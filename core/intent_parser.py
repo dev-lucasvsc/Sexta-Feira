@@ -1,5 +1,5 @@
 """
-JARVIS v2.0 - Módulo de Interpretação de Intenções
+Sexta-Feira v2.0 - Módulo de Interpretação de Intenções
 ====================================================
 Analisa a transcrição do comando e gera a lista de acoes_sistema
 correspondente, sem depender de um LLM externo.
@@ -14,6 +14,22 @@ import os
 import logging
 
 logger = logging.getLogger("IntentParser")
+
+
+def _find_whatsapp() -> str:
+    """
+    Encontra o executável do WhatsApp Desktop no Windows.
+    O WhatsApp instala em LocalAppData com hash no caminho — não fica no PATH.
+    Retorna o caminho completo se encontrado, senão abre a versão web.
+    """
+    local = os.environ.get("LOCALAPPDATA", "")
+    whatsapp_dir = os.path.join(local, "WhatsApp")
+    if os.path.isdir(whatsapp_dir):
+        for f in os.listdir(whatsapp_dir):
+            if f.lower() == "whatsapp.exe":
+                return os.path.join(whatsapp_dir, f)
+    # Fallback: versão web
+    return "https://web.whatsapp.com"
 
 
 # ==============================================================================
@@ -63,7 +79,7 @@ APP_MAP = {
     # Comunicação / mídia
     "spotify":                "spotify",
     "discord":                "discord",
-    "whatsapp":               "whatsapp",
+    "whatsapp":               _find_whatsapp(),
     "telegram":               "telegram",
     "slack":                  "slack",
     "zoom":                   "zoom",
@@ -158,8 +174,87 @@ class IntentParser:
         acoes = []
         fala = ""
 
+        # --- Apresentação ---
+        if any(t in comando for t in [
+            "quem é você", "quem você é", "se apresenta", "se apresente",
+            "apresentação", "o que você é", "o que é você", "fale sobre você",
+            "me fale sobre você", "qual seu nome", "como você se chama"
+        ]):
+            acoes.append({"tipo": "apresentacao"})
+            fala = "__apresentacao__"
+
+        # --- Notícias do dia ---
+        elif any(t in comando for t in [
+            "notícias", "noticias", "novidades", "o que aconteceu",
+            "me dá as notícias", "notícias de hoje", "últimas notícias",
+            "o que está acontecendo", "manchetes"
+        ]):
+            acoes.append({"tipo": "abrir_site", "parametro": "https://news.google.com/topstories?hl=pt-BR&gl=BR&ceid=BR:pt-419"})
+            fala = "__noticias__"
+
+        # --- Lembretes ---
+        if any(t in comando for t in ["lembra", "lembrete", "me avisa", "me lembra", "alarme"]):
+            minutos, segundos, texto = self._parse_reminder(comando)
+            if minutos > 0 or segundos > 0:
+                acoes.append({"tipo": "lembrete", "minutos": minutos, "segundos": segundos, "texto": texto})
+                fala = "__lembrete__"
+            else:
+                fala = "Não entendi o tempo do lembrete. Diga, por exemplo: me lembra em 30 minutos para tomar água."
+
+        # --- Lembretes ativos ---
+        elif any(t in comando for t in ["lembretes ativos", "meus lembretes", "quais lembretes"]):
+            acoes.append({"tipo": "lembrete_listar"})
+            fala = "__lembrete_listar__"
+
+        # --- Hora e data — resolvidos no orchestrator sem LLM ---
+        elif any(t in comando for t in ["que horas", "horas são", "hora atual", "horas agora",
+                                         "que dia", "dia hoje", "data hoje", "dia da semana"]):
+            fala = ""  # orchestrator resolve antes do intent_parser
+
+        # --- Clima --- resolvido no orchestrator
+        elif any(t in comando for t in ["clima", "temperatura", "tempo hoje",
+                                         "vai chover", "previsão do tempo"]):
+            fala = ""  # orchestrator resolve antes do intent_parser
+
+        # --- Organizar Downloads ---
+        elif any(t in comando for t in ["organizar downloads", "organiza downloads", "organizar pasta downloads", "limpar downloads"]):
+            acoes.append({"tipo": "arquivo_organizar", "path": "~/Downloads"})
+            fala = "Organizando sua pasta de downloads por tipo de arquivo."
+
+        # --- Organizar pasta específica ---
+        elif any(t in comando for t in ["organizar pasta", "organiza pasta"]):
+            pasta = self._extract_after(comando, ["organizar pasta", "organiza pasta"]).strip()
+            path = f"~/{pasta}" if pasta else "~/Downloads"
+            acoes.append({"tipo": "arquivo_organizar", "path": path})
+            fala = f"Organizando a pasta {pasta or 'Downloads'}."
+
+        # --- Criar pasta ---
+        elif any(t in comando for t in ["criar pasta", "cria pasta", "nova pasta"]):
+            nome = self._extract_after(comando, ["criar pasta", "cria pasta", "nova pasta"]).strip()
+            if nome:
+                acoes.append({"tipo": "arquivo_criar_pasta", "path": f"~/Desktop/{nome}"})
+                fala = f"Criando pasta '{nome}' na área de trabalho."
+            else:
+                fala = "Qual o nome da pasta que devo criar?"
+
+        # --- Listar pasta ---
+        elif any(t in comando for t in ["listar", "listar pasta", "o que tem na pasta", "mostrar arquivos", "ver arquivos"]):
+            pasta = self._extract_after(comando, ["listar pasta", "listar", "o que tem na pasta", "mostrar arquivos", "ver arquivos"]).strip()
+            path = f"~/{pasta}" if pasta else "~/Desktop"
+            acoes.append({"tipo": "arquivo_listar", "path": path})
+            fala = f"Listando conteúdo de {pasta or 'área de trabalho'}."
+
+        # --- Buscar arquivo ---
+        elif any(t in comando for t in ["buscar arquivo", "procurar arquivo", "encontrar arquivo", "achar arquivo"]):
+            nome = self._extract_after(comando, ["buscar arquivo", "procurar arquivo", "encontrar arquivo", "achar arquivo"]).strip()
+            if nome:
+                acoes.append({"tipo": "arquivo_buscar", "path": "~/", "nome": nome})
+                fala = f"Buscando '{nome}' nos seus arquivos."
+            else:
+                fala = "Qual arquivo devo buscar?"
+
         # --- Abrir aplicativo ---
-        if any(t in comando for t in ["abrir", "abre", "abra", "iniciar", "inicia", "lançar", "executar", "abrindo"]):
+        elif any(t in comando for t in ["abrir", "abre", "abra", "iniciar", "inicia", "lançar", "executar", "abrindo"]):
             app = self._match_app(comando)
             if app:
                 nome, cmd = app
@@ -263,11 +358,24 @@ class IntentParser:
     # ------------------------------------------------------------------
 
     def _match_app(self, comando: str) -> tuple[str, str] | None:
-        """Tenta encontrar um app no APP_MAP pelo nome mais longo primeiro."""
-        # Ordena por comprimento decrescente para evitar match parcial curto
+        """
+        Tenta encontrar um app no comando.
+        Prioridade:
+        1. CUSTOM_APP_PATHS do config (caminhos completos definidos pelo usuário)
+        2. APP_MAP genérico (apps no PATH do Windows)
+        """
+        from config import Config
+
+        # 1. Caminhos personalizados — maior prioridade
+        for nome, caminho in Config.CUSTOM_APP_PATHS.items():
+            if nome in comando:
+                return nome, caminho
+
+        # 2. APP_MAP genérico — ordena pelo nome mais longo primeiro
         for nome, cmd in sorted(APP_MAP.items(), key=lambda x: len(x[0]), reverse=True):
             if nome in comando:
                 return nome, cmd
+
         return None
 
     def _match_site(self, comando: str) -> tuple[str, str] | None:
@@ -276,6 +384,44 @@ class IntentParser:
             if nome in comando:
                 return nome, url
         return None
+
+    def _parse_reminder(self, comando: str) -> tuple[int, int, str]:
+        """
+        Extrai minutos, segundos e texto do lembrete.
+        Exemplos:
+            "me lembra em 30 minutos para tomar água" → (30, 0, "tomar água")
+            "lembra em 1 hora e 30 minutos reunião"   → (90, 0, "reunião")
+            "me avisa em 45 segundos"                 → (0, 45, "aviso")
+        """
+        import re
+        minutos  = 0
+        segundos = 0
+
+        # Horas
+        h = re.search(r'(\d+)\s*hora', comando)
+        if h:
+            minutos += int(h.group(1)) * 60
+
+        # Minutos
+        m = re.search(r'(\d+)\s*minuto', comando)
+        if m:
+            minutos += int(m.group(1))
+
+        # Segundos
+        s = re.search(r'(\d+)\s*segundo', comando)
+        if s:
+            segundos = int(s.group(1))
+
+        # Extrai o texto do lembrete (após "para" ou "que" ou no final)
+        texto = ""
+        for sep in ["para ", "que ", "sobre ", "de "]:
+            if sep in comando:
+                texto = comando.split(sep, 1)[-1].strip()
+                break
+        if not texto:
+            texto = "lembrete"
+
+        return minutos, segundos, texto
 
     def _extract_after(self, comando: str, triggers: list[str]) -> str:
         """Extrai o texto após qualquer um dos triggers, retornando o maior fragmento."""

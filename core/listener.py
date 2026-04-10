@@ -1,5 +1,5 @@
 """
-JARVIS v2.0 - Módulo de Escuta (Wake Word Offline + STT)
+Sexta-Feira v2.0 - Módulo de Escuta (Wake Word Offline + STT)
 =========================================================
 Usa Vosk para detecção de wake word 100% offline e local.
 Google Speech Recognition como fallback para transcrição do comando
@@ -44,7 +44,7 @@ class Listener:
 
     def __init__(
         self,
-        wake_word:       str = "Sexta feira",
+        wake_word:       str = "sexta",
         model_path:      str = "models/vosk-model-small-pt-0.3",
         language:        str = "pt-BR",
         command_timeout: int = 8,
