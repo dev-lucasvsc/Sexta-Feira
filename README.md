@@ -1,4 +1,4 @@
-# JARVIS v2.0 — Assistente Virtual Local
+# Sexta-Feira — Assistente Virtual Local
 
 Assistente virtual de desktop com wake word offline (Vosk), voz neural PT-BR (Edge TTS), integração com Obsidian como segundo cérebro, suporte a Claude API e Ollama local, automação do SO, SmartHome via SmartThings e interface holográfica via WebSocket.
 
@@ -7,7 +7,7 @@ Assistente virtual de desktop com wake word offline (Vosk), voz neural PT-BR (Ed
 ## Estrutura do Projeto
 
 ```
-jarvis_v2/
+Sexta-Feira/
 │
 ├── main.py                         # Ponto de entrada — execute este
 ├── config.py                       # Todas as configurações centralizadas
@@ -61,14 +61,14 @@ python -m pip install --upgrade SpeechRecognition setuptools
 
 ### 2. Instale o modelo Vosk PT-BR (wake word offline)
 
-Baixe e extraia em `D:\jarvis\models\`:
+Baixe e extraia em `D:\SextFeira\models\`:
 ```
 https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip
 ```
 
 Resultado esperado:
 ```
-D:\jarvis\models\vosk-model-small-pt-0.3\
+D:\SextaFeira\models\vosk-model-small-pt-0.3\
 ```
 
 ### 3. Instale o Ollama (LLM local gratuito)
@@ -123,7 +123,7 @@ TTS_PITCH = "-4Hz"         # mais grave, estilo JARVIS
 python ws_server.py
 ```
 
-**Terminal 2 — JARVIS:**
+**Terminal 2 — Sexta-Feira:**
 ```bash
 python main.py
 ```
@@ -135,7 +135,7 @@ O browser abre automaticamente com a interface holográfica.
 ## Fluxo de Funcionamento
 
 ```
-Microfone → Vosk detecta "jarvis" (offline)
+Microfone → Vosk detecta "Sexta feira" (offline)
     ↓
 Google STT transcreve o comando (fallback: Vosk)
     ↓
@@ -155,17 +155,17 @@ LLM processa com contexto do Obsidian
 
 | Comando | Ação |
 |---|---|
-| "jarvis, abrir chrome" | Abre o Chrome |
-| "jarvis, abrir vs code" | Abre o VS Code |
-| "jarvis, abrir youtube" | Abre youtube.com |
-| "jarvis, pesquisar python" | Pesquisa no Google |
-| "jarvis, fechar spotify" | Fecha o processo |
-| "jarvis, volume 60" | Ajusta volume para 60% |
-| "jarvis, bloquear tela" | Bloqueia o Windows |
-| "jarvis, desligar computador" | Desliga em 30s |
-| "jarvis, tirar print" | Captura de tela |
-| "jarvis, abrir downloads" | Abre pasta Downloads |
-| "jarvis, mostrar desktop" | Mostra área de trabalho |
+| "Sexta Feira, abrir chrome" | Abre o Chrome |
+| "Sexta Feira, abrir vs code" | Abre o VS Code |
+| "Sexta Feira, abrir youtube" | Abre youtube.com |
+| "Sexta Feira, pesquisar python" | Pesquisa no Google |
+| "Sexta Feira, fechar spotify" | Fecha o processo |
+| "Sexta Feira, volume 60" | Ajusta volume para 60% |
+| "Sexta Feira, bloquear tela" | Bloqueia o Windows |
+| "Sexta Feira, desligar computador" | Desliga em 30s |
+| "Sexta Feira, tirar print" | Captura de tela |
+| "Sexta Feira, abrir downloads" | Abre pasta Downloads |
+| "Sexta Feira, mostrar desktop" | Mostra área de trabalho |
 
 Com LLM ativo, qualquer pergunta em linguagem natural é processada.
 

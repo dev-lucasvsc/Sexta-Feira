@@ -24,16 +24,16 @@ logging.basicConfig(
 logger = logging.getLogger("Orchestrator")
 
 
-class JarvisOrchestrator:
+class SextafeiraOrchestrator:
     """
     Orquestrador central do assistente.
     Integra todos os módulos e executa o loop principal de escuta e resposta.
     """
 
-    WAKE_WORD = "jarvis"
+    WAKE_WORD = "Sexta feira"
 
     def __init__(self, obsidian_vault_path: str, interface_host: str = "localhost", interface_port: int = 5005):
-        logger.info("Inicializando JARVIS v2.0...")
+        logger.info("Inicializando Sexta feira v2.0...")
 
         self.listener = Listener(
             wake_word=self.WAKE_WORD,
@@ -54,7 +54,7 @@ class JarvisOrchestrator:
         self.intent_parser = IntentParser()
 
         self.running = False
-        logger.info("Todos os módulos carregados. JARVIS pronto.")
+        logger.info("Todos os módulos carregados. Sexta feira pronta.")
 
     # ------------------------------------------------------------------
     # MOCK: Simula chamada ao LLM (Claude, GPT, Ollama, etc.)
@@ -109,7 +109,7 @@ class JarvisOrchestrator:
 
     def _build_prompt(self, transcricao: str, contexto_obsidian: str) -> tuple[str, str]:
         """Retorna (system_prompt, user_prompt) usados por Claude e Ollama."""
-        system = """Você é JARVIS, um assistente pessoal avançado, direto e eficiente.
+        system = """Você é Sexta Feira, um assistente pessoal avançado, direto e eficiente.
 Responda SEMPRE em português brasileiro.
 Responda APENAS com um objeto JSON válido, sem markdown, sem texto fora do JSON.
 
@@ -266,7 +266,7 @@ Comando do usuário: {transcricao}"""
         self.running = True
         self.interface.connect()
         self.interface.send_state("standby")
-        self.speaker.speak("JARVIS v2.0 online. Aguardando sua palavra de ativação.")
+        self.speaker.speak("Sexta feira online. Como posso ajudar senhor.")
 
         logger.info(f"Loop principal iniciado. Wake word: '{self.WAKE_WORD}'")
 
@@ -308,7 +308,7 @@ Comando do usuário: {transcricao}"""
                 self.interface.send_state("standby")
 
         except KeyboardInterrupt:
-            logger.info("Encerrando JARVIS por interrupção do usuário.")
+            logger.info("Encerrando Sexta feira por interrupção do usuário.")
         finally:
             self.stop()
 
@@ -317,4 +317,4 @@ Comando do usuário: {transcricao}"""
         self.running = False
         self.interface.disconnect()
         self.speaker.speak("Até logo.")
-        logger.info("JARVIS encerrado.")
+        logger.info("Sexta feira encerrada.")

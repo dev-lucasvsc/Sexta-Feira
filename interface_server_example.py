@@ -26,7 +26,7 @@ PORT = 5005
 
 async def handler(websocket):
     """Recebe e processa mensagens do JARVIS core."""
-    logger.info(f"JARVIS conectado: {websocket.remote_address}")
+    logger.info(f"Sexta feira conectada: {websocket.remote_address}")
     try:
         async for raw_message in websocket:
             try:
@@ -51,11 +51,11 @@ async def handler(websocket):
                 logger.warning(f"Mensagem inválida recebida: {raw_message}")
 
     except websockets.exceptions.ConnectionClosed:
-        logger.info("Conexão com JARVIS encerrada.")
+        logger.info("Conexão com Sexta feira encerrada.")
 
 
 async def main():
-    logger.info(f"Servidor WebSocket aguardando JARVIS em ws://{HOST}:{PORT}")
+    logger.info(f"Servidor WebSocket aguardando Sexta feira em ws://{HOST}:{PORT}")
     async with websockets.serve(handler, HOST, PORT):
         await asyncio.Future()  # Loop infinito
 

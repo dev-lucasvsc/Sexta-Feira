@@ -10,7 +10,7 @@ import time
 import webbrowser
 from pathlib import Path
 from config import Config
-from core.orchestrator import JarvisOrchestrator
+from core.orchestrator import SextafeiraOrchestrator
 
 
 def main():
@@ -20,12 +20,12 @@ def main():
         webbrowser.open(interface_path.as_uri())
         time.sleep(1.5)  # aguarda o browser abrir antes de iniciar o JARVIS
 
-    jarvis = JarvisOrchestrator(
+    Sextafeira = SextafeiraOrchestrator(
         obsidian_vault_path=Config.OBSIDIAN_VAULT_PATH,
         interface_host=Config.INTERFACE_HOST,
         interface_port=Config.INTERFACE_PORT
     )
-    jarvis.start()
+    Sextafeira.start()
 
 
 if __name__ == "__main__":
