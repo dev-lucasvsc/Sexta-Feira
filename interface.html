@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JARVIS v2.0</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #050810;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Courier New', monospace;
+      overflow: hidden;
+    }
+
+    .wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+
+    canvas { display: block; }
+
+    .hud {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      letter-spacing: .18em;
+      color: #4a9eff66;
+      text-transform: uppercase;
+    }
+
+    .hud-dot {
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: #4a9eff;
+      animation: blk 2s ease-in-out infinite;
+    }
+
+    @keyframes blk {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: .08; }
+    }
+
+    .ws-status {
+      font-size: 10px;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 2px;
+      border: 1px solid #1a3a6a;
+      color: #2a5a9a;
+      transition: color .4s, border-color .4s;
+    }
+
+    .ws-status.connected    { color: #3a9eff; border-color: #1a4a8a; }
+    .ws-status.disconnected { color: #2a3a5a; border-color: #111820; }
+    .ws-status.error        { color: #aa3030; border-color: #441010; }
+
+    .rdout {
+      font-size: 10px;
+      color: #2a5a9a;
+      letter-spacing: .1em;
+      text-align: center;
+      max-width: 360px;
+      opacity: .75;
+      line-height: 1.6;
+      min-height: 16px;
+      transition: color .5s;
+    }
+
+    /* Só aparece se aberto sem o JARVIS (modo debug) */
+    .debug-btns {
+      display: none;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .debug-btns.visible { display: flex; }
+
+    .btn {
+      font-family: 'Courier New', monospace;
+      font-size: 10px;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+      padding: 5px 14px;
+      background: transparent;
+      border: 1px solid #1a3a6a;
+      color: #3a7acc;
+      cursor: pointer;
+      border-radius: 1px;
+      transition: all .2s;
+    }
+
+    .btn:hover { border-color: #4a9eff; color: #80c0ff; background: #4a9eff08; }
+  </style>
+</head>
+<body>
+
+<div class="wrap">
+  <canvas id="c" width="520" height="520"></canvas>
+
+  <div class="hud">
+    <div class="hud-dot"></div>
+    <span id="lbl">standby</span>
+  </div>
+
+  <span class="ws-status disconnected" id="wsStatus">desconectado</span>
+
+  <div class="rdout" id="rdout">aguardando conexão com o núcleo...</div>
+
+  <!-- Botões de debug — aparecem automaticamente se o WS não conectar -->
+  <div class="debug-btns" id="debugBtns">
+    <button class="btn" onclick="setState('idle')">standby</button>
+    <button class="btn" onclick="setState('listen')">escutar</button>
+    <button class="btn" onclick="setState('think')">processar</button>
+    <button class="btn" onclick="setState('speak')">responder</button>
+  </div>
+</div>
+
+<script>
+// ─── Canvas setup ────────────────────────────────────────────────────────────
+const cv = document.getElementById('c');
+const cx = cv.getContext('2d');
+const W = 520, H = 520, MX = W / 2, MY = H / 2;
+let t = 0, energy = 0, targetEnergy = 0, state = 'idle';
+
+// ─── Anéis orbitais ──────────────────────────────────────────────────────────
+const RINGS = [
+  { r: 60,  tilt:  .22, speed:  .007,  phase: 0,    w: .6,  dash: [8, 12],  opacity: .42 },
+  { r: 82,  tilt: -.38, speed: -.005,  phase: 1.05, w: .5,  dash: [4, 8],   opacity: .38 },
+  { r: 104, tilt:  .55, speed:  .004,  phase: 2.1,  w: .45, dash: [16, 8],  opacity: .34 },
+  { r: 124, tilt: -.7,  speed: -.003,  phase: .55,  w: .4,  dash: [6, 14],  opacity: .30 },
+  { r: 144, tilt:  .85, speed:  .0025, phase: 3.2,  w: .38, dash: [20, 10], opacity: .26 },
+  { r: 162, tilt: -.25, speed: -.002,  phase: 1.7,  w: .32, dash: [3, 10],  opacity: .22 },
+  { r: 178, tilt:  .45, speed:  .0018, phase: 4.1,  w: .28, dash: [12, 18], opacity: .18 },
+];
+
+// ─── Grade esférica ───────────────────────────────────────────────────────────
+const GLOBE_DOTS = [];
+for (let lat = -80; lat <= 80; lat += 18) {
+  const rLat = lat * Math.PI / 180;
+  const count = Math.max(4, Math.floor(Math.cos(rLat) * 22));
+  for (let i = 0; i < count; i++) {
+    GLOBE_DOTS.push({ lat: rLat, lon: (i / count) * Math.PI * 2, phase: Math.random() * Math.PI * 2 });
+  }
+}
+
+const GLOBE_R = 188, MERIDIANS = 12, PARALLELS = 8;
+let synapses = [], sparks = [], streams = [];
+
+// ─── Spawn functions ──────────────────────────────────────────────────────────
+function spawnSynapse() {
+  const ri1 = Math.floor(Math.random() * RINGS.length);
+  const ri2 = Math.floor(Math.random() * RINGS.length);
+  const angle = Math.random() * Math.PI * 2;
+  const destAngle = angle + (Math.random() - .5) * 2.2;
+  const life = 35 + Math.random() * 35;
+  synapses.push({
+    ox: MX + Math.cos(angle) * RINGS[ri1].r,
+    oy: MY + Math.sin(angle) * RINGS[ri1].r,
+    tx: MX + Math.cos(destAngle) * RINGS[ri2].r,
+    ty: MY + Math.sin(destAngle) * RINGS[ri2].r,
+    life, ml: life, progress: 0,
+    bright: Math.random() > .6
+  });
+}
+
+function spawnSpark(x, y) {
+  for (let i = 0; i < 2; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const spd = .3 + Math.random() * .6;
+    const life = 12 + Math.random() * 10;
+    sparks.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, life, ml: life, size: .5 + Math.random() * .7 });
+  }
+}
+
+function spawnStream() {
+  const ri = Math.floor(Math.random() * RINGS.length);
+  streams.push({
+    ring: ri, phase: Math.random() * Math.PI * 2,
+    speed: (.007 + Math.random() * .01) * (Math.random() > .5 ? 1 : -1),
+    life: 70 + Math.random() * 60, ml: 0,
+    len: .25 + Math.random() * .4
+  });
+}
+
+// ─── Draw functions ───────────────────────────────────────────────────────────
+function drawGlobe() {
+  cx.strokeStyle = `rgba(40,100,220,${.06 + energy * .07})`;
+  cx.lineWidth = .35;
+  for (let m = 0; m < MERIDIANS; m++) {
+    const lon = (m / MERIDIANS) * Math.PI * 2 + t * .0008;
+    cx.beginPath();
+    let first = true;
+    for (let ang = -Math.PI / 2; ang <= Math.PI / 2; ang += .08) {
+      const cosLat = Math.cos(ang);
+      const x3 = GLOBE_R * cosLat * Math.cos(lon);
+      const y3 = GLOBE_R * Math.sin(ang);
+      const z3 = GLOBE_R * cosLat * Math.sin(lon);
+      if (z3 > 0) {
+        if (first) { cx.moveTo(MX + x3, MY + y3); first = false; }
+        else cx.lineTo(MX + x3, MY + y3);
+      } else first = true;
+    }
+    cx.stroke();
+  }
+  for (let p = 1; p < PARALLELS; p++) {
+    const lat = (-Math.PI / 2) + (p / PARALLELS) * Math.PI;
+    const rr = GLOBE_R * Math.cos(lat);
+    const yy = MY + GLOBE_R * Math.sin(lat);
+    cx.beginPath();
+    cx.ellipse(MX, yy, rr, rr * .18, 0, 0, Math.PI * 2);
+    cx.stroke();
+  }
+}
+
+function drawGlobeDots() {
+  for (const d of GLOBE_DOTS) {
+    const lon = d.lon + t * .0012;
+    const x3 = GLOBE_R * Math.cos(d.lat) * Math.cos(lon);
+    const z3 = GLOBE_R * Math.cos(d.lat) * Math.sin(lon);
+    if (z3 < 0) continue;
+    const pulse = Math.sin(t * .04 + d.phase) * .5 + .5;
+    cx.beginPath();
+    cx.arc(MX + x3, MY + GLOBE_R * Math.sin(d.lat), .7 + pulse * .4, 0, Math.PI * 2);
+    cx.fillStyle = `rgba(60,140,255,${.1 + pulse * .18 + energy * .14})`;
+    cx.fill();
+  }
+}
+
+function drawRings() {
+  for (const ring of RINGS) {
+    cx.save();
+    cx.translate(MX, MY);
+    cx.rotate(ring.phase * .08);
+    cx.scale(1, Math.sin(ring.tilt));
+    cx.beginPath();
+    cx.arc(0, 0, ring.r, 0, Math.PI * 2);
+    cx.setLineDash(ring.dash);
+    cx.lineDashOffset = -t * ring.speed * 180;
+    cx.strokeStyle = `rgba(50,120,240,${ring.opacity + energy * .28})`;
+    cx.lineWidth = ring.w + energy * 1.1;
+    cx.stroke();
+    cx.setLineDash([]);
+    cx.restore();
+  }
+}
+
+function drawStreams() {
+  for (const s of streams) {
+    const ring = RINGS[s.ring];
+    cx.save();
+    cx.translate(MX, MY);
+    cx.rotate(ring.phase * .08);
+    cx.scale(1, Math.sin(ring.tilt));
+    const alpha = Math.sin((s.life / s.ml) * Math.PI) * (.45 + energy * .3);
+    cx.beginPath();
+    cx.arc(0, 0, ring.r, s.phase, s.phase + s.len * (s.speed > 0 ? 1 : -1), s.speed < 0);
+    cx.strokeStyle = `rgba(100,190,255,${alpha})`;
+    cx.lineWidth = 1 + energy * .8;
+    cx.stroke();
+    cx.restore();
+    s.phase += s.speed * (1 + energy * .5);
+  }
+}
+
+function drawSynapses() {
+  for (const s of synapses) {
+    s.progress = 1 - (s.life / s.ml);
+    const p = s.progress;
+    const endX = s.ox + (s.tx - s.ox) * p;
+    const endY = s.oy + (s.ty - s.oy) * p;
+    const alpha = Math.sin(p * Math.PI) * (.55 + energy * .2);
+
+    cx.beginPath();
+    cx.moveTo(s.ox, s.oy);
+    cx.lineTo(endX, endY);
+    cx.strokeStyle = s.bright ? `rgba(160,215,255,${alpha})` : `rgba(50,130,240,${alpha})`;
+    cx.lineWidth = s.bright ? .8 : .5;
+    cx.stroke();
+
+    cx.beginPath();
+    cx.arc(endX, endY, s.bright ? 1.4 : .9, 0, Math.PI * 2);
+    cx.fillStyle = `rgba(180,230,255,${alpha})`;
+    cx.fill();
+
+    if (p > .92 && s.life === Math.floor(s.ml * .08)) spawnSpark(endX, endY);
+  }
+}
+
+function drawSparks() {
+  for (const s of sparks) {
+    cx.beginPath();
+    cx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+    cx.fillStyle = `rgba(140,210,255,${(s.life / s.ml) * .7})`;
+    cx.fill();
+  }
+}
+
+function drawCore() {
+  const pulse = 1 + Math.sin(t * .05) * (.03 + energy * .07);
+  const R = 14 * pulse;
+
+  for (let i = 2; i > 0; i--) {
+    cx.beginPath();
+    cx.arc(MX, MY, R + i * 9 + energy * 3, 0, Math.PI * 2);
+    cx.fillStyle = `rgba(30,90,200,${.025 * i + energy * .015})`;
+    cx.fill();
+  }
+
+  cx.beginPath();
+  cx.arc(MX, MY, R + 3, 0, Math.PI * 2);
+  cx.strokeStyle = `rgba(60,140,255,${.22 + energy * .3})`;
+  cx.lineWidth = .5;
+  cx.stroke();
+
+  const g = cx.createRadialGradient(MX - 3, MY - 3, 1, MX, MY, R);
+  g.addColorStop(0, '#c0e0ff');
+  g.addColorStop(.4, '#3a90ff');
+  g.addColorStop(.8, '#0a40b0');
+  g.addColorStop(1, '#040d2a');
+  cx.beginPath();
+  cx.arc(MX, MY, R, 0, Math.PI * 2);
+  cx.fillStyle = g;
+  cx.fill();
+
+  cx.strokeStyle = `rgba(160,210,255,${.3 + energy * .3})`;
+  cx.lineWidth = .4;
+  cx.beginPath();
+  cx.moveTo(MX - R * .45, MY); cx.lineTo(MX + R * .45, MY);
+  cx.moveTo(MX, MY - R * .45); cx.lineTo(MX, MY + R * .45);
+  cx.stroke();
+}
+
+// ─── Loop ─────────────────────────────────────────────────────────────────────
+function update() {
+  t++;
+  energy += (targetEnergy - energy) * .045;
+  for (const ring of RINGS) ring.phase += ring.speed * (1 + energy * .7);
+
+  const sRate = state === 'speak' ? .38 : state === 'think' ? .16 : state === 'listen' ? .06 : .012;
+  if (Math.random() < sRate) spawnSynapse();
+
+  const stRate = state === 'speak' ? .12 : state === 'think' ? .06 : state === 'listen' ? .025 : .005;
+  if (Math.random() < stRate) spawnStream();
+
+  for (const s of synapses) { s.ml = s.ml || s.life; s.life--; }
+  synapses = synapses.filter(s => s.life > 0);
+  for (const s of streams) { s.ml = s.ml || s.life; s.life--; }
+  streams = streams.filter(s => s.life > 0);
+  for (const s of sparks) {
+    s.ml = s.ml || s.life;
+    s.x += s.vx; s.y += s.vy;
+    s.vx *= .88; s.vy *= .88;
+    s.life--;
+  }
+  sparks = sparks.filter(s => s.life > 0);
+}
+
+function render() {
+  cx.clearRect(0, 0, W, H);
+  drawGlobe();
+  drawGlobeDots();
+  drawRings();
+  drawStreams();
+  drawSynapses();
+  drawSparks();
+  drawCore();
+  update();
+  requestAnimationFrame(render);
+}
+
+// ─── State machine ─────────────────────────────────────────────────────────────
+const STATE_MAP = {
+  idle:    { energy: 0,    label: 'standby',       text: 'sistema online — aguardando ativação' },
+  standby: { energy: 0,    label: 'standby',       text: 'sistema online — aguardando ativação' },
+  listen:  { energy: .28,  label: 'escutando...',  text: 'microfone ativo — detectando wake word...' },
+  think:   { energy: .6,   label: 'processando...', text: 'consultando segundo cérebro — analisando contexto...' },
+  speak:   { energy: 1,    label: 'respondendo',   text: 'sintetizando resposta — transmitindo...' },
+  erro:    { energy: .1,   label: 'erro',          text: 'falha no processamento — aguardando novo comando.' },
+};
+
+function setState(s, customText) {
+  state = s;
+  const cfg = STATE_MAP[s] || STATE_MAP.idle;
+  targetEnergy = cfg.energy;
+  document.getElementById('lbl').textContent = cfg.label;
+  document.getElementById('rdout').textContent = customText || cfg.text;
+}
+
+// ─── WebSocket ─────────────────────────────────────────────────────────────────
+const WS_URL = 'ws://localhost:5005';
+const wsEl   = document.getElementById('wsStatus');
+let ws, wsRetryTimer;
+
+function connectWS() {
+  try {
+    ws = new WebSocket(WS_URL);
+  } catch (e) {
+    showDebugButtons();
+    return;
+  }
+
+  ws.onopen = () => {
+    wsEl.textContent = 'conectado';
+    wsEl.className = 'ws-status connected';
+    clearTimeout(wsRetryTimer);
+    document.getElementById('debugBtns').classList.remove('visible');
+    setState('idle');
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+
+      // Suporte a dois formatos:
+      // Formato 1 (orquestrador): { "estado": "speak", "payload": { "dados_para_projetar": {...} } }
+      // Formato 2 (simples):      { "estado": "speak", "texto": "..." }
+      const estado  = data.estado || 'idle';
+      const payload = data.payload || {};
+      const texto   = payload.dados_para_projetar?.conteudo || data.texto || null;
+
+      setState(estado, texto);
+
+    } catch (e) {
+      console.warn('Mensagem WS inválida:', event.data);
+    }
+  };
+
+  ws.onclose = () => {
+    wsEl.textContent = 'desconectado';
+    wsEl.className = 'ws-status disconnected';
+    setState('idle', 'conexão perdida — tentando reconectar...');
+    wsRetryTimer = setTimeout(connectWS, 3000);
+    showDebugButtons();
+  };
+
+  ws.onerror = () => {
+    wsEl.textContent = 'erro ws';
+    wsEl.className = 'ws-status error';
+    showDebugButtons();
+  };
+}
+
+function showDebugButtons() {
+  document.getElementById('debugBtns').classList.add('visible');
+}
+
+// Inicia tudo
+render();
+connectWS();
+</script>
+</body>
+</html>

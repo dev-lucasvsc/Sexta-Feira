@@ -1,0 +1,12 @@
+# Segurança
+.env
+config.py
+
+# Pastas do Python
+__pycache__/
+*.pyc
+
+# Ambientes Virtuais (se você tiver)
+venv/
+.venv/
+env/

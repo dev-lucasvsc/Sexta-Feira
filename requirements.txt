@@ -1,0 +1,33 @@
+# JARVIS v2.0 - Dependências do Projeto
+# =======================================
+# Instale com:
+#   python -m pip install -r requirements.txt
+#
+# ATENÇÃO — Python 3.12.x obrigatório.
+# Python 3.13+ e 3.14 não são suportados pelo PyAudio e Vosk.
+# Baixe em: https://www.python.org/downloads/release/python-3120/
+# Marque "Add Python to PATH" na instalação.
+
+# --- Módulo de Escuta (STT + Wake Word offline) ---
+SpeechRecognition==3.10.4
+PyAudio==0.2.14
+vosk==0.3.45
+sounddevice==0.4.6
+
+# --- Módulo de Fala (TTS) ---
+edge-tts==6.1.12
+pygame==2.6.1
+
+# --- Módulo de Automação ---
+requests==2.31.0
+
+# --- WebSocket ---
+websocket-client==1.7.0
+websockets==12.0
+
+# --- LLM: Claude API (opcional) ---
+anthropic==0.40.0
+
+# --- Utilitários ---
+python-dotenv==1.0.1
+setuptools
