@@ -1,33 +1,69 @@
-# Sexta-Feira — Assistente Virtual Local
+# Sexta-Feira v2.0 — Assistente Virtual Local
 
-Assistente virtual de desktop com wake word offline (Vosk), voz neural PT-BR (Edge TTS), integração com Obsidian como segundo cérebro, suporte a Claude API e Ollama local, automação do SO, SmartHome via SmartThings e interface holográfica via WebSocket.
+Assistente virtual de desktop com wake word offline, voz neural PT-BR, integração com Obsidian, LLM dual (Claude API + Ollama), controle do SO, visão computacional, Spotify, Google Calendar, notificações nativas e interface holográfica via WebSocket.
 
 ---
 
-## Estrutura do Projeto
+## Estrutura de Arquivos
 
 ```
-Sexta-Feira/
+D:\jarvis\
 │
 ├── main.py                         # Ponto de entrada — execute este
 ├── config.py                       # Todas as configurações centralizadas
 ├── requirements.txt                # Dependências Python
-├── ws_server.py                    # Servidor WebSocket (ponte Python ↔ interface.html)
+├── ws_server.py                    # Servidor WebSocket (Python ↔ interface.html)
 ├── interface.html                  # Interface holográfica (abre no browser)
 ├── .env                            # Variáveis sensíveis (não versionar)
 │
-├── models/
-│   └── vosk-model-small-pt-0.3/   # Modelo de voz offline (Vosk)
+├── core/                           # Módulos do assistente
+│   ├── __init__.py
+│   │
+│   │   # — Entrada / Saída —
+│   ├── listener.py                 # Wake word offline (Vosk) + STT (Google)
+│   ├── speaker.py                  # TTS neural PT-BR (Edge TTS + pygame)
+│   │
+│   │   # — Inteligência —
+│   ├── orchestrator.py             # Cérebro central — orquestra tudo
+│   ├── intent_parser.py            # Interpreta comandos → ações locais
+│   │
+│   │   # — Memória —
+│   ├── memory.py                   # Leitura + hot-reload do vault Obsidian
+│   ├── obsidian_writer.py          # Escrita de notas/tarefas no Obsidian
+│   ├── session_memory.py           # Histórico da sessão atual (RAM)
+│   ├── history.py                  # Histórico persistente (SQLite)
+│   │
+│   │   # — Automação —
+│   ├── automation.py               # Controle do SO (apps, volume, shell)
+│   ├── file_manager.py             # Gerenciar arquivos e pastas
+│   ├── window_manager.py           # Controlar janelas (minimizar, focar, snap)
+│   ├── screen_vision.py            # Captura de tela + análise pelo LLM
+│   │
+│   │   # — Serviços Externos —
+│   ├── spotify.py                  # Controle do Spotify via Web API
+│   ├── calendar_manager.py         # Google Calendar (consulta de eventos)
+│   │
+│   │   # — Interface / UX —
+│   ├── interface_bridge.py         # Envia estados ao WebSocket
+│   ├── notifier.py                 # Notificações toast nativas do Windows
+│   ├── reminder.py                 # Lembretes com timer por voz
+│   └── command_logger.py           # Log de comandos em arquivo .txt
 │
-└── core/
-    ├── __init__.py
-    ├── orchestrator.py             # Cérebro central
-    ├── listener.py                 # Wake word offline (Vosk) + STT (Google)
-    ├── speaker.py                  # TTS neural PT-BR (Edge TTS)
-    ├── memory.py                   # Obsidian (segundo cérebro)
-    ├── automation.py               # Automação SO + SmartThings
-    ├── interface_bridge.py         # Envia estados ao WebSocket
-    └── intent_parser.py            # Interpreta comandos de voz → ações
+├── models/                         # Modelos de IA locais
+│   └── vosk-model-small-pt-0.3/   # Modelo de wake word offline (Vosk)
+│
+├── data/                           # Dados gerados em tempo de execução
+│   ├── history.db                  # Banco SQLite de conversas
+│   ├── screenshots/                # Screenshots capturados pela visão
+│   ├── spotify_token.json          # Token OAuth2 do Spotify (gerado automaticamente)
+│   ├── google_credentials.json     # Credenciais OAuth2 do Google (você baixa)
+│   └── google_token.json           # Token OAuth2 do Google (gerado automaticamente)
+│
+├── logs/                           # Logs de comandos por data
+│   └── sexta_YYYY-MM-DD.txt        # Um arquivo por dia
+│
+└── assets/                         # Recursos estáticos (opcional)
+    └── icon.ico                    # Ícone para notificações toast
 ```
 
 ---
@@ -40,11 +76,10 @@ Python 3.13+ e 3.14 não são suportados pelo PyAudio e Vosk.
 
 1. Baixe em: https://www.python.org/downloads/release/python-3120/
 2. No instalador, marque **"Add Python to PATH"**
-3. Após instalar, desative os atalhos da Microsoft Store:
-   - Configurações → Aplicativos → Aliases de execução de aplicativo
-   - Desative `python.exe` e `python3.exe` da Store
-4. Libere caminhos longos (mais de 260 caracteres):
-   - Abra o instalador do Python novamente → clique em **"Disable path length limit"**
+3. Desative os atalhos da Microsoft Store:
+   - Configurações → Aplicativos → Aliases de execução → desative `python.exe` e `python3.exe`
+4. Libere caminhos longos:
+   - Abra o instalador novamente → clique em **"Disable path length limit"**
 
 ---
 
@@ -57,25 +92,22 @@ python -m pip install -r requirements.txt
 python -m pip install --upgrade SpeechRecognition setuptools
 ```
 
-> Se houver erro no `distutils` com Python 3.12, o segundo comando resolve.
+### 2. Modelo Vosk PT-BR (wake word offline)
 
-### 2. Instale o modelo Vosk PT-BR (wake word offline)
-
-Baixe e extraia em `D:\SextFeira\models\`:
+Baixe e extraia em `D:\jarvis\models\`:
 ```
 https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip
 ```
 
-Resultado esperado:
+Resultado:
 ```
-D:\SextaFeira\models\vosk-model-small-pt-0.3\
+D:\jarvis\models\vosk-model-small-pt-0.3\
 ```
 
-### 3. Instale o Ollama (LLM local gratuito)
+### 3. Ollama (LLM local gratuito)
 
-Baixe o instalador em: https://ollama.com/download
+Baixe em: https://ollama.com/download
 
-Após instalar, baixe o modelo:
 ```bash
 ollama pull llama3.2
 ```
@@ -88,29 +120,27 @@ ollama pull llama3.2
 
 ```env
 JARVIS_VAULT_PATH="C:/Users/Lucas/OneDrive/Documentos/Obsidian Vault"
-SMARTTHINGS_TOKEN=seu_token_aqui
 ANTHROPIC_API_KEY=sk-ant-...
+WEATHER_API_KEY=sua_chave_openweathermap
+SPOTIFY_CLIENT_ID=seu_client_id
+SPOTIFY_CLIENT_SECRET=seu_client_secret
 ```
 
-> Use barras normais `/` no caminho — barras invertidas causam SyntaxError no Python.
+> Use sempre barras `/` nos caminhos — barras invertidas causam SyntaxError no Python.
 
-### Arquivo `config.py`
+### Arquivo `config.py` — principais ajustes
 
 ```python
-# Caminho do vault Obsidian
 OBSIDIAN_VAULT_PATH = "C:/Users/Lucas/OneDrive/Documentos/Obsidian Vault"
-
-# Provider do LLM — escolha um:
-LLM_PROVIDER = "ollama"    # local, gratuito (recomendado para testes)
-LLM_PROVIDER = "claude"    # API paga, melhor qualidade
-LLM_PROVIDER = "none"      # só comandos locais, sem LLM
-
-# Voz
-TTS_VOICE = "antonio"      # masculina PT-BR
-TTS_PITCH = "-4Hz"         # mais grave, estilo JARVIS
+WAKE_WORD           = "sexta"
+LLM_PROVIDER        = "ollama"     # "claude" | "ollama" | "none"
+TTS_VOICE           = "antonio"    # voz masculina PT-BR
+TTS_PITCH           = "-4Hz"       # tom mais grave
+WEATHER_CITY        = "Brasilia"
+PERSONALITY_TONE    = "casual"     # "formal" | "casual" | "técnico" | "conciso"
 ```
 
-### VS Code — selecione o interpretador correto
+### VS Code — interpretador correto
 
 `Ctrl+Shift+P` → `Python: Select Interpreter` → Python 3.12.0
 
@@ -128,63 +158,188 @@ python ws_server.py
 python main.py
 ```
 
-O browser abre automaticamente com a interface holográfica.
+O browser abre automaticamente com a interface holográfica e conecta ao servidor.
 
 ---
 
-## Fluxo de Funcionamento
+## Fluxo Completo
 
 ```
-Microfone → Vosk detecta "Sexta feira" (offline)
+Microfone
     ↓
-Google STT transcreve o comando (fallback: Vosk)
+Vosk detecta "sexta" (offline, sem internet)
     ↓
-IntentParser tenta resolver localmente
-    ↓ (se não resolver)
-LLM processa com contexto do Obsidian
+Google STT transcreve o comando completo
     ↓
-┌──────────────┬──────────────────┬──────────────────┐
-│  Edge TTS    │  interface.html  │  OSAutomation /  │
-│  (voz PT-BR) │  (orbe reage)    │  SmartThings     │
-└──────────────┴──────────────────┴──────────────────┘
+Orchestrator processa em cascata:
+
+    1. Hora / data?          → resposta imediata (stdlib)
+    2. Clima?                → OpenWeatherMap API
+    3. Tela?                 → ScreenVision (PIL + Claude Vision)
+    4. Calendário?           → Google Calendar API
+    5. Intenção local?       → IntentParser (apps, sites, janelas, Spotify...)
+    6. LLM?                  → Ollama local ou Claude API
+                               (com contexto do Obsidian + histórico SQLite)
+
+    ↓
+┌─────────────┬──────────────────┬───────────────────┬──────────────┐
+│  Edge TTS   │  interface.html  │  OSAutomation /   │  Notifier    │
+│  (voz PT-BR)│  (orbe reativa)  │  WindowManager    │  (toast)     │
+└─────────────┴──────────────────┴───────────────────┴──────────────┘
+    ↓
+CommandLogger → logs/sexta_YYYY-MM-DD.txt
+History       → data/history.db
 ```
 
 ---
 
-## Comandos de Voz (sem LLM)
+## Módulos e Funcionalidades
 
+### Entrada / Saída
+| Módulo | Função |
+|---|---|
+| `listener.py` | Wake word offline (Vosk) + transcrição (Google STT) |
+| `speaker.py` | Síntese de voz neural PT-BR (Edge TTS) |
+
+### Inteligência
+| Módulo | Função |
+|---|---|
+| `orchestrator.py` | Cérebro central — orquestra todos os módulos |
+| `intent_parser.py` | 15+ intenções locais sem LLM |
+
+### Memória
+| Módulo | Função |
+|---|---|
+| `memory.py` | Lê e indexa notas do Obsidian com hot-reload |
+| `obsidian_writer.py` | Cria notas, tarefas e entradas de diário |
+| `session_memory.py` | Histórico da sessão atual (RAM) |
+| `history.py` | Histórico persistente entre sessões (SQLite) |
+
+### Automação
+| Módulo | Função |
+|---|---|
+| `automation.py` | Abre/fecha apps, volume, shell, lock, shutdown |
+| `file_manager.py` | Organiza, move, busca e cria pastas/arquivos |
+| `window_manager.py` | Minimiza, maximiza, foca, snap de janelas |
+| `screen_vision.py` | Captura tela e analisa com Claude Vision |
+
+### Serviços Externos
+| Módulo | Função |
+|---|---|
+| `spotify.py` | Play, pause, next, volume, shuffle via Web API |
+| `calendar_manager.py` | Consulta eventos do Google Calendar |
+
+### Interface / UX
+| Módulo | Função |
+|---|---|
+| `interface_bridge.py` | WebSocket → interface holográfica |
+| `notifier.py` | Toast notifications nativas do Windows |
+| `reminder.py` | Lembretes com timer disparados por voz |
+| `command_logger.py` | Log de comandos em arquivo .txt diário |
+
+---
+
+## Comandos de Voz
+
+### Sistema
 | Comando | Ação |
 |---|---|
-| "Sexta Feira, abrir chrome" | Abre o Chrome |
-| "Sexta Feira, abrir vs code" | Abre o VS Code |
-| "Sexta Feira, abrir youtube" | Abre youtube.com |
-| "Sexta Feira, pesquisar python" | Pesquisa no Google |
-| "Sexta Feira, fechar spotify" | Fecha o processo |
-| "Sexta Feira, volume 60" | Ajusta volume para 60% |
-| "Sexta Feira, bloquear tela" | Bloqueia o Windows |
-| "Sexta Feira, desligar computador" | Desliga em 30s |
-| "Sexta Feira, tirar print" | Captura de tela |
-| "Sexta Feira, abrir downloads" | Abre pasta Downloads |
-| "Sexta Feira, mostrar desktop" | Mostra área de trabalho |
+| "abrir chrome" | Abre o Chrome |
+| "fechar spotify" | Fecha o processo |
+| "volume 60" | Ajusta volume para 60% |
+| "bloquear tela" | Bloqueia o Windows |
+| "desligar computador" | Desliga em 30s |
+| "tirar print" | Captura de tela |
 
-Com LLM ativo, qualquer pergunta em linguagem natural é processada.
+### Janelas
+| Comando | Ação |
+|---|---|
+| "minimizar tudo" | Mostra área de trabalho |
+| "maximizar janela" | Maximiza a janela atual |
+| "fechar janela" | Fecha a janela em foco |
+| "focar no VS Code" | Coloca VS Code em foco |
+| "mover janela pra esquerda" | Snap left |
+| "alternar janela" | Alt+Tab |
+| "listar janelas abertas" | Lista o que está aberto |
+
+### Arquivos
+| Comando | Ação |
+|---|---|
+| "organizar downloads" | Separa por tipo (Imagens, Docs, Vídeos...) |
+| "criar pasta Projetos" | Cria na área de trabalho |
+| "buscar arquivo relatório" | Busca por nome |
+
+### Obsidian
+| Comando | Ação |
+|---|---|
+| "anota que preciso revisar o projeto" | Adiciona ao diário do dia |
+| "criar tarefa comprar café" | Cria tarefa com checkbox |
+| "criar nota Reunião de quinta" | Cria nota nova |
+
+### Spotify
+| Comando | Ação |
+|---|---|
+| "toca jazz no Spotify" | Busca e toca |
+| "pausar" | Pausa |
+| "próxima" | Próxima faixa |
+| "o que está tocando" | Informa a música atual |
+| "modo aleatório" | Shuffle on/off |
+
+### Informações
+| Comando | Ação |
+|---|---|
+| "que horas são" | Hora atual |
+| "que dia é hoje" | Data completa |
+| "como está o clima" | Temperatura e condição |
+| "o que tenho hoje" | Eventos do Google Calendar |
+| "próximo evento" | Próximo compromisso |
+| "o que tem na tela" | Análise visual da tela |
+| "qual o erro na tela" | Identifica erros visíveis |
+
+### Lembretes e Utilidades
+| Comando | Ação |
+|---|---|
+| "me lembra em 30 minutos para tomar água" | Cria lembrete |
+| "quais lembretes ativos" | Lista lembretes |
+| "modo silencioso" | Desativa voz |
+| "volta a falar" | Reativa voz |
+| "se apresenta" | Apresentação completa |
+| "notícias de hoje" | Abre Google Notícias |
 
 ---
 
-## Providers de LLM
+## Setup de Serviços Externos
 
-### Ollama (gratuito, offline)
-```python
-LLM_PROVIDER = "ollama"
-OLLAMA_MODEL  = "llama3.2"
+### Spotify
+1. Acesse: https://developer.spotify.com/dashboard
+2. Crie um app → copie Client ID e Client Secret
+3. Em "Redirect URIs" adicione: `http://localhost:8888/callback`
+4. Configure no `.env`: `SPOTIFY_CLIENT_ID` e `SPOTIFY_CLIENT_SECRET`
+5. Execute uma vez para autorizar:
+```bash
+python -c "from core.spotify import SpotifyController; SpotifyController('ID','SECRET').authorize()"
 ```
 
-### Claude API
-```python
-LLM_PROVIDER      = "claude"
-ANTHROPIC_API_KEY = "sk-ant-..."
+### Google Calendar
+1. Acesse: https://console.cloud.google.com
+2. Crie um projeto → ative a **Google Calendar API**
+3. Crie credenciais OAuth2 (tipo: **Desktop App**)
+4. Baixe o JSON → salve como: `data/google_credentials.json`
+5. Execute uma vez para autorizar:
+```bash
+python -c "from core.calendar_manager import CalendarManager; CalendarManager().authorize()"
 ```
-Custo estimado: ~$0.001 a $0.003 por interação. Com $5 tem ~1.500 a 5.000 interações.
+
+### OpenWeatherMap (clima)
+1. Crie conta em: https://openweathermap.org/api
+2. Gere uma API key gratuita (1.000 chamadas/dia)
+3. Configure no `.env`: `WEATHER_API_KEY=sua_chave`
+
+### Claude API (LLM)
+1. Acesse: https://console.anthropic.com
+2. Gere uma API key (mínimo $5 de crédito)
+3. Configure no `.env`: `ANTHROPIC_API_KEY=sk-ant-...`
+4. No `config.py`: `LLM_PROVIDER = "claude"`
 
 ---
 
@@ -195,7 +350,9 @@ Custo estimado: ~$0.001 a $0.003 por interação. Com $5 tem ~1.500 a 5.000 inte
 | PyAudio não instala | Python 3.13/3.14 | Use Python 3.12.x |
 | SyntaxError unicodeescape | Barra invertida no caminho | Use `/` nos caminhos |
 | distutils not found | Python 3.12 removeu distutils | `pip install --upgrade setuptools` |
-| Pylance com avisos | Interpretador errado | Ctrl+Shift+P → Select Interpreter → 3.12 |
-| Modelo Vosk não encontrado | Caminho errado | Verifique VOSK_MODEL_PATH no config.py |
-| Interface não conecta | ws_server.py parado | Inicie o Terminal 1 primeiro |
+| Pylance com avisos amarelos | Interpretador errado no VS Code | Ctrl+Shift+P → Select Interpreter → 3.12 |
+| Modelo Vosk não encontrado | Caminho errado | Verifique `VOSK_MODEL_PATH` no config.py |
+| Interface não conecta | ws_server.py não está rodando | Inicie Terminal 1 primeiro |
 | websockets não encontrado | Não estava no requirements original | `pip install websockets` |
+| Spotify "sem token" | Autorização não feita | Execute o comando de authorize() |
+| Calendar "credenciais não encontradas" | JSON não está em data/ | Baixe do Google Console e renomeie |

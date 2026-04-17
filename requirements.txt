@@ -4,9 +4,6 @@
 #   python -m pip install -r requirements.txt
 #
 # ATENÇÃO — Python 3.12.x obrigatório.
-# Python 3.13+ e 3.14 não são suportados pelo PyAudio e Vosk.
-# Baixe em: https://www.python.org/downloads/release/python-3120/
-# Marque "Add Python to PATH" na instalação.
 
 # --- Módulo de Escuta (STT + Wake Word offline) ---
 SpeechRecognition==3.10.4
@@ -27,6 +24,25 @@ websockets==12.0
 
 # --- LLM: Claude API (opcional) ---
 anthropic==0.40.0
+
+# --- Obsidian Hot-reload ---
+watchdog==4.0.0
+
+# --- Visão Computacional ---
+pillow==10.3.0
+
+# --- Controle de Janelas ---
+pygetwindow==0.0.9
+pyautogui==0.9.54
+
+# --- Notificações Windows ---
+win10toast==0.9
+
+# --- Google Calendar (opcional) ---
+google-auth==2.29.0
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+google-api-python-client==2.127.0
 
 # --- Utilitários ---
 python-dotenv==1.0.1

@@ -44,7 +44,7 @@ class Listener:
 
     def __init__(
         self,
-        wake_word:       str = "sexta",
+        wake_word:       str = "sexta feira",
         model_path:      str = "models/vosk-model-small-pt-0.3",
         language:        str = "pt-BR",
         command_timeout: int = 8,

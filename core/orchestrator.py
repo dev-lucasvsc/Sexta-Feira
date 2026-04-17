@@ -19,6 +19,13 @@ from core.file_manager import FileManager
 from core.reminder import ReminderManager
 from core.session_memory import SessionMemory
 from core.command_logger import CommandLogger
+from core.history import ConversationHistory
+from core.obsidian_writer import ObsidianWriter
+from core.spotify import SpotifyController
+from core.screen_vision import ScreenVision
+from core.window_manager import WindowManager
+from core.notifier import WindowsNotifier
+from core.calendar_manager import CalendarManager
 
 # Configuração de log global
 logging.basicConfig(
@@ -54,15 +61,31 @@ class SextaFeiraOrchestrator:
         )
         # Callback: atualiza a interface holográfica em tempo real durante a fala
         self.speaker.on_speaking_change = self._on_speaking_change
-        self.memory = ObsidianMemory(vault_path=obsidian_vault_path)
-        self.os_automation  = OSAutomation()
-        self.smart_home     = SmartHomeController()
-        self.interface      = InterfaceBridge(host=interface_host, port=interface_port)
-        self.intent_parser  = IntentParser()
-        self.file_manager   = FileManager()
-        self.session_memory = SessionMemory(max_turns=Config.SESSION_MEMORY_TURNS)
-        self.cmd_logger     = CommandLogger(log_dir=Config.LOG_DIR)
-        self.reminders      = ReminderManager(on_reminder=self._on_reminder)
+        self.memory = ObsidianMemory(
+            vault_path=obsidian_vault_path,
+            hot_reload=Config.OBSIDIAN_HOT_RELOAD
+        )
+        self.os_automation   = OSAutomation()
+        self.smart_home      = SmartHomeController()
+        self.interface       = InterfaceBridge(host=interface_host, port=interface_port)
+        self.intent_parser   = IntentParser()
+        self.file_manager    = FileManager()
+        self.session_memory  = SessionMemory(max_turns=Config.SESSION_MEMORY_TURNS)
+        self.cmd_logger      = CommandLogger(log_dir=Config.LOG_DIR)
+        self.reminders       = ReminderManager(on_reminder=self._on_reminder)
+        self.history         = ConversationHistory()
+        self.obsidian_writer = ObsidianWriter(vault_path=obsidian_vault_path)
+        self.spotify         = SpotifyController(
+            client_id=Config.SPOTIFY_CLIENT_ID,
+            client_secret=Config.SPOTIFY_CLIENT_SECRET,
+        )
+        self.screen_vision   = ScreenVision(api_key=Config.ANTHROPIC_API_KEY)
+        self.window_manager  = WindowManager()
+        self.notifier        = WindowsNotifier()
+        self.calendar        = CalendarManager()
+
+        # Modo silencioso — responde só na interface, sem fala
+        self.silent_mode = False
 
         self.running = False
         logger.info("Todos os módulos carregados. Sexta-Feira pronta.")
@@ -81,8 +104,10 @@ class SextaFeiraOrchestrator:
     def _on_reminder(self, texto: str):
         """Callback disparado quando um lembrete vence."""
         logger.info(f"[Reminder] Disparando: '{texto}'")
-        self.interface.send_state("speak")
-        self.speaker.speak(f"Lembrete: {texto}")
+        self.notifier.notify_reminder(texto)
+        if not self.silent_mode:
+            self.interface.send_state("speak")
+            self.speaker.speak(f"Lembrete: {texto}")
 
     # ------------------------------------------------------------------
     # Hora, data e clima (sem LLM)
@@ -141,7 +166,16 @@ class SextaFeiraOrchestrator:
             logger.error(f"[Clima] Erro: {e}")
             return self._resposta_simples("Não consegui obter as informações do clima no momento.")
 
-    def _resposta_simples(self, fala: str, titulo: str = "", conteudo: str = "") -> dict:
+    def _resposta_tela(self, tipo: str = "geral") -> dict:
+        """Captura a tela e analisa com visão computacional."""
+        self.interface.send_state("think")
+        if tipo == "erro":
+            ok, msg = self.screen_vision.find_error()
+        elif tipo == "leitura":
+            ok, msg = self.screen_vision.read_screen_text()
+        else:
+            ok, msg = self.screen_vision.describe_screen()
+        return self._resposta_simples(msg, titulo="Visão", conteudo=msg)
         """Helper para montar resposta sem LLM."""
         return {
             "fala_vocal": fala,
@@ -167,6 +201,31 @@ class SextaFeiraOrchestrator:
         """
         logger.info(f"[LLM] Processando: '{transcricao}'")
         cmd = transcricao.lower()
+
+        # --- Visão computacional (sem LLM externo necessário) ---
+        if any(t in cmd for t in ["o que tem na tela", "o que está na tela",
+                                   "lê a tela", "descreve a tela", "qual o erro na tela",
+                                   "o que está aberto", "resume a tela"]):
+            tipo = "erro" if "erro" in cmd else "leitura" if "lê" in cmd or "texto" in cmd else "geral"
+            return self._resposta_tela(tipo)
+
+        # --- Google Calendar ---
+        if any(t in cmd for t in ["o que tenho hoje", "agenda de hoje", "eventos hoje",
+                                   "compromissos hoje"]):
+            ok, msg = self.calendar.get_today()
+            return self._resposta_simples(msg)
+
+        if any(t in cmd for t in ["o que tenho amanhã", "agenda de amanhã", "eventos amanhã"]):
+            ok, msg = self.calendar.get_tomorrow()
+            return self._resposta_simples(msg)
+
+        if any(t in cmd for t in ["próximo evento", "próximo compromisso", "quando é o próximo"]):
+            ok, msg = self.calendar.get_next_event()
+            return self._resposta_simples(msg)
+
+        if any(t in cmd for t in ["eventos da semana", "agenda da semana", "semana"]):
+            ok, msg = self.calendar.get_week()
+            return self._resposta_simples(msg)
 
         # --- Hora e data (sem LLM) ---
         dt_resp = self._get_datetime_response(cmd)
@@ -248,10 +307,12 @@ Regras:
 - Use o contexto do Obsidian para enriquecer a resposta quando relevante
 - Use o histórico da conversa para manter continuidade"""
 
-        # Histórico de sessão
-        historico = self.session_memory.get_summary()
+        # Histórico: usa SQLite (persistente) se disponível, senão RAM
+        historico = self.history.get_summary_for_llm(n_turns=4)
+        if not historico:
+            historico = self.session_memory.get_summary()
 
-        user = f"""{f'Histórico recente:{chr(10)}{historico}{chr(10)}' if historico else ''}
+        user = f"""{f'{historico}{chr(10)}' if historico else ''}
 Contexto do segundo cérebro (Obsidian):
 {contexto_obsidian if contexto_obsidian else 'Nenhuma nota relevante encontrada.'}
 
@@ -348,11 +409,10 @@ Comando atual: {transcricao}"""
 
         fala = (
             "Olá. Eu sou a Sexta-Feira, sua assistente pessoal de inteligência artificial. "
-            "Fui projetada para ser a interface central do seu ecossistema digital e do seu ambiente físico. "
-            "Entre as minhas capacidades, eu posso gerenciar seus aplicativos, consultar sua base de dados, "
-            "e operar a automação dos dispositivos inteligentes da sua casa. "
-            "Além disso, estou pronta para realizar pesquisas na rede e responder às suas perguntas. "
-            "Basta me dizer o que deseja."
+            "Fui desenvolvida para facilitar sua vida digital — posso abrir aplicativos, "
+            "pesquisar na internet, consultar suas notas do Obsidian, controlar seu sistema "
+            "e responder perguntas em linguagem natural. "
+            "Estou sempre pronta quando você me chamar."
         )
 
         # Dispara demonstração dos estados da interface em background
@@ -466,6 +526,98 @@ Comando atual: {transcricao}"""
                 else:
                     self.smart_home.send_command(dispositivo, comando)
 
+            elif tipo == "janela_minimizar_tudo":
+                ok, msg = self.window_manager.minimize_all()
+                if not self.silent_mode: self.speaker.speak(msg)
+
+            elif tipo == "janela_maximizar":
+                ok, msg = self.window_manager.maximize_current()
+                if not self.silent_mode: self.speaker.speak(msg)
+
+            elif tipo == "janela_fechar":
+                ok, msg = self.window_manager.close_current()
+                if not self.silent_mode: self.speaker.speak(msg)
+
+            elif tipo == "janela_focar":
+                ok, msg = self.window_manager.focus_window(acao.get("nome", ""))
+                if not self.silent_mode: self.speaker.speak(msg)
+
+            elif tipo == "janela_listar":
+                ok, msg = self.window_manager.list_windows()
+                self.speaker.speak(msg)
+
+            elif tipo == "janela_snap_esquerda":
+                ok, msg = self.window_manager.snap_left()
+
+            elif tipo == "janela_snap_direita":
+                ok, msg = self.window_manager.snap_right()
+
+            elif tipo == "janela_alternar":
+                self.window_manager.alt_tab()
+
+            elif tipo == "notificacao":
+                self.notifier.show(
+                    titulo=acao.get("titulo", "Sexta-Feira"),
+                    mensagem=acao.get("mensagem", ""),
+                    duracao=acao.get("duracao", 5)
+                )
+
+            elif tipo == "spotify_play":
+                query = acao.get("query", "")
+                if query:
+                    ok, msg = self.spotify.search_and_play(query)
+                else:
+                    ok, msg = self.spotify.play()
+                self.speaker.speak(msg)
+
+            elif tipo == "spotify_pause":
+                ok, msg = self.spotify.pause()
+                self.speaker.speak(msg)
+
+            elif tipo == "spotify_next":
+                ok, msg = self.spotify.next_track()
+                self.speaker.speak(msg)
+
+            elif tipo == "spotify_prev":
+                ok, msg = self.spotify.previous_track()
+                self.speaker.speak(msg)
+
+            elif tipo == "spotify_volume":
+                ok, msg = self.spotify.set_volume(int(acao.get("parametro", 50)))
+                self.speaker.speak(msg)
+
+            elif tipo == "spotify_now":
+                ok, msg = self.spotify.now_playing()
+                self.speaker.speak(msg)
+
+            elif tipo == "spotify_shuffle":
+                ok, msg = self.spotify.toggle_shuffle()
+                self.speaker.speak(msg)
+
+            elif tipo == "obsidian_criar":
+                ok, msg = self.obsidian_writer.create_note(
+                    titulo=acao.get("titulo", "Nova Nota"),
+                    conteudo=acao.get("conteudo", ""),
+                    pasta=acao.get("pasta", "")
+                )
+                self.speaker.speak(msg)
+
+            elif tipo == "obsidian_anotar":
+                ok, msg = self.obsidian_writer.append_to_daily_note(acao.get("conteudo", ""))
+                self.speaker.speak(msg)
+
+            elif tipo == "obsidian_tarefa":
+                ok, msg = self.obsidian_writer.create_task(acao.get("conteudo", ""))
+                self.speaker.speak(msg)
+
+            elif tipo == "modo_silencioso":
+                ativar = acao.get("ativar", True)
+                self.silent_mode = ativar
+                status = "ativado" if ativar else "desativado"
+                logger.info(f"[Orchestrator] Modo silencioso {status}.")
+                if not ativar:
+                    self.speaker.speak("Modo silencioso desativado. Voltei a falar normalmente.")
+
             elif tipo == "arquivo_listar":
                 ok, msg = self.file_manager.list_folder(acao.get("path", "~/Desktop"))
                 self.speaker.speak(msg)
@@ -527,19 +679,27 @@ Comando atual: {transcricao}"""
                 # 2. Busca contexto no Obsidian
                 contexto = self.memory.search(query=comando)
 
-                # 3. Registra na memória de sessão
+                # 3. Registra na memória de sessão e histórico
                 self.session_memory.add_user(comando)
+                self.history.add("user", comando)
 
                 # 4. Processa o comando
                 self.interface.send_state("think")
                 resposta = self._call_llm(transcricao=comando, contexto_obsidian=contexto)
 
-                # 5. Fala a resposta (interface reage via callback)
+                # 5. Fala a resposta (respeita modo silencioso)
                 fala = resposta.get("fala_vocal", "")
                 if fala:
                     self.cmd_logger.log_response(fala)
                     self.session_memory.add_assistant(fala)
-                    self.speaker.speak(fala)
+                    self.history.add("assistant", fala)
+                    if not self.silent_mode:
+                        self.speaker.speak(fala)
+                    else:
+                        # Modo silencioso: só atualiza interface
+                        self.interface.send_state("speak", payload={"texto": fala})
+                        time.sleep(0.5)
+                        self.interface.send_state("standby")
 
                 # 6. Executa ações
                 acoes = resposta.get("acoes_sistema", [])
@@ -563,7 +723,9 @@ Comando atual: {transcricao}"""
         """Encerra os recursos do assistente de forma limpa."""
         self.running = False
         self.reminders.cancel_all()
+        self.history.end_session()
         self.cmd_logger.log_session_end()
         self.interface.disconnect()
-        self.speaker.speak("Até logo chefe.")
+        if not self.silent_mode:
+            self.speaker.speak("Até logo.")
         logger.info("Sexta-Feira encerrada.")

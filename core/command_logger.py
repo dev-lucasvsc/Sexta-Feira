@@ -64,7 +64,7 @@ class CommandLogger:
 
     def log_response(self, resposta: str):
         """Registra a resposta da Sexta-Feira."""
-        self._write(f"SEXTA: {resposta[:120]}")
+        self._write(f"SEXTA FEIRA: {resposta[:120]}")
 
     def log_action(self, tipo: str, parametro: str = ""):
         """Registra uma ação executada."""

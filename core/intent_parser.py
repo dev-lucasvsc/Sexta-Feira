@@ -192,8 +192,123 @@ class IntentParser:
             acoes.append({"tipo": "abrir_site", "parametro": "https://news.google.com/topstories?hl=pt-BR&gl=BR&ceid=BR:pt-419"})
             fala = "__noticias__"
 
+        # --- Controle de janelas ---
+        if any(t in comando for t in ["minimizar tudo", "mostrar área de trabalho",
+                                       "minimiza tudo", "esconde tudo"]):
+            acoes.append({"tipo": "janela_minimizar_tudo"})
+            fala = "Minimizando todas as janelas."
+
+        elif any(t in comando for t in ["maximizar janela", "maximiza janela",
+                                         "janela cheia", "tela cheia"]):
+            acoes.append({"tipo": "janela_maximizar"})
+            fala = "Maximizando janela."
+
+        elif any(t in comando for t in ["fechar janela", "fecha janela", "fechar esta janela"]):
+            acoes.append({"tipo": "janela_fechar"})
+            fala = "Fechando janela."
+
+        elif any(t in comando for t in ["alternar janela", "alt tab", "trocar janela"]):
+            acoes.append({"tipo": "janela_alternar"})
+            fala = "Alternando janela."
+
+        elif any(t in comando for t in ["listar janelas", "janelas abertas", "o que está aberto"]):
+            acoes.append({"tipo": "janela_listar"})
+            fala = "__janela_listar__"
+
+        elif any(t in comando for t in ["mover janela pra esquerda", "snap esquerda",
+                                         "janela na esquerda"]):
+            acoes.append({"tipo": "janela_snap_esquerda"})
+            fala = "Janela movida para a esquerda."
+
+        elif any(t in comando for t in ["mover janela pra direita", "snap direita",
+                                         "janela na direita"]):
+            acoes.append({"tipo": "janela_snap_direita"})
+            fala = "Janela movida para a direita."
+
+        elif any(t in comando for t in ["focar no", "focar em", "abrir janela do",
+                                         "ir para o", "ir para a"]):
+            nome = self._extract_after(comando, ["focar no", "focar em", "abrir janela do",
+                                                  "ir para o", "ir para a"]).strip()
+            if nome:
+                acoes.append({"tipo": "janela_focar", "nome": nome})
+                fala = f"Focando em {nome}."
+
+        # --- Modo silencioso ---
+        elif any(t in comando for t in ["modo silencioso", "silêncio", "para de falar",
+                                         "fica quieta", "sem voz", "desativa voz"]):
+            acoes.append({"tipo": "modo_silencioso", "ativar": True})
+            fala = "Modo silencioso ativado. Vou responder apenas na interface."
+
+        elif any(t in comando for t in ["desativar silêncio", "volta a falar", "fala de novo",
+                                         "ativa voz", "desativa modo silencioso"]):
+            acoes.append({"tipo": "modo_silencioso", "ativar": False})
+            fala = ""  # a própria ação fala ao desativar
+
+        # --- Spotify ---
+        elif any(t in comando for t in ["pausar", "pause", "parar música", "para a música"]):
+            acoes.append({"tipo": "spotify_pause"})
+            fala = "Pausando o Spotify."
+
+        elif any(t in comando for t in ["próxima música", "próxima", "pular", "skip"]):
+            acoes.append({"tipo": "spotify_next"})
+            fala = "Próxima música."
+
+        elif any(t in comando for t in ["música anterior", "voltar música", "anterior"]):
+            acoes.append({"tipo": "spotify_prev"})
+            fala = "Voltando para a música anterior."
+
+        elif any(t in comando for t in ["o que está tocando", "qual música", "que música é essa"]):
+            acoes.append({"tipo": "spotify_now"})
+            fala = "__spotify_now__"
+
+        elif any(t in comando for t in ["modo aleatório", "aleatório", "shuffle"]):
+            acoes.append({"tipo": "spotify_shuffle"})
+            fala = "__spotify_shuffle__"
+
+        elif any(t in comando for t in ["tocar", "toca", "reproduzir", "colocar para tocar"]):
+            if "spotify" in comando or any(t in comando for t in ["música", "artista", "album", "playlist"]):
+                query = self._extract_after(comando, ["tocar", "toca", "reproduzir",
+                                                       "colocar para tocar", "no spotify"])
+                query = query.replace("spotify", "").replace("música", "").strip()
+                if query:
+                    acoes.append({"tipo": "spotify_play", "query": query})
+                    fala = f"Buscando {query} no Spotify."
+                else:
+                    acoes.append({"tipo": "spotify_play", "query": ""})
+                    fala = "Retomando reprodução no Spotify."
+
+        # --- Obsidian: anotar no diário ---
+        elif any(t in comando for t in ["anota", "anotar", "escreve", "registra", "adiciona ao diário"]):
+            conteudo = self._extract_after(comando, ["anota", "anotar", "escreve",
+                                                      "registra", "adiciona ao diário", "que"]).strip()
+            if conteudo:
+                acoes.append({"tipo": "obsidian_anotar", "conteudo": conteudo})
+                fala = f"Anotando no diário: {conteudo[:50]}."
+            else:
+                fala = "O que devo anotar?"
+
+        # --- Obsidian: criar tarefa ---
+        elif any(t in comando for t in ["criar tarefa", "nova tarefa", "adicionar tarefa", "tarefa nova"]):
+            tarefa = self._extract_after(comando, ["criar tarefa", "nova tarefa",
+                                                    "adicionar tarefa", "tarefa nova"]).strip()
+            if tarefa:
+                acoes.append({"tipo": "obsidian_tarefa", "conteudo": tarefa})
+                fala = f"Criando tarefa: {tarefa[:50]}."
+            else:
+                fala = "Qual é a tarefa?"
+
+        # --- Obsidian: criar nota ---
+        elif any(t in comando for t in ["criar nota", "nova nota", "criar arquivo"]):
+            titulo = self._extract_after(comando, ["criar nota", "nova nota",
+                                                    "criar arquivo", "chamada", "com título"]).strip()
+            if titulo:
+                acoes.append({"tipo": "obsidian_criar", "titulo": titulo})
+                fala = f"Criando nota '{titulo}' no Obsidian."
+            else:
+                fala = "Qual o título da nota?"
+
         # --- Lembretes ---
-        if any(t in comando for t in ["lembra", "lembrete", "me avisa", "me lembra", "alarme"]):
+        elif any(t in comando for t in ["lembra", "lembrete", "me avisa", "me lembra", "alarme"]):
             minutos, segundos, texto = self._parse_reminder(comando)
             if minutos > 0 or segundos > 0:
                 acoes.append({"tipo": "lembrete", "minutos": minutos, "segundos": segundos, "texto": texto})
