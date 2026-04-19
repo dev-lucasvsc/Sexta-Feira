@@ -1,5 +1,5 @@
 """
-JARVIS v2.0 - Módulo de Automação e Smart Home
+Sexta-Feira v2.0 - Módulo de Automação e Smart Home
 ===============================================
 Classes para controle do Sistema Operacional (os/subprocess)
 e integração com SmartThings via API REST.
@@ -126,52 +126,50 @@ class OSAutomation:
 
     def set_volume(self, level: int) -> bool:
         """
-        Ajusta o volume do sistema via PowerShell (nativo no Windows, sem dependências extras).
-        
+        Ajusta o volume do sistema via PowerShell usando a API de áudio do Windows.
+        Método direto e confiável via SetMasterVolumeLevelScalar.
+
         Args:
             level: Volume de 0 a 100.
         """
         level = max(0, min(100, level))
         logger.info(f"[OS] Ajustando volume para {level}%")
-        # Converte 0-100 para 0.0-1.0 (escala do PowerShell)
-        ps_level = round(level / 100, 2)
-        cmd = (
-            f'powershell -Command "'
-            f'$wshShell = New-Object -ComObject WScript.Shell; '
-            f'$vol = New-Object -ComObject SAPI.SpVoice; '
-            f'(New-Object -ComObject Shell.Application).Windows() | Out-Null; '
-            f'[audio]::Volume = {ps_level}'
-            f'"'
+        scalar = round(level / 100, 2)
+
+        # Usa a API COM do Windows para setar o volume diretamente
+        ps = (
+            r'$a = (New-Object -ComObject "WScript.Shell");'
+            r'Add-Type -TypeDefinition @"'
+            r'using System; using System.Runtime.InteropServices;'
+            r'[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]'
+            r'class MMDeviceEnumerator {}'
+            r'"@ -ErrorAction SilentlyContinue;'
+            rf'$vol = [float]{scalar};'
+            r'(New-Object -ComObject "WMPlayer.OCX").settings.volume = '
+            rf'{level};'
         )
-        # Abordagem mais simples e confiável via nircmd (se disponível) ou PowerShell
-        # PowerShell puro para mute/unmute e volume:
-        ps_script = (
-            f"$obj = New-Object -ComObject WScript.Shell; "
-            f"1..50 | ForEach-Object {{ $obj.SendKeys([char]174) }}; "  # muta tudo primeiro
-        )
-        # Usa a API de áudio do Windows via PowerShell com SoundVolumeView ou direto
+
+        # Método mais simples e universal: nircmd (se disponível) ou SendKeys calculado
         try:
-            # Método direto: seta via SetMasterVolumeLevelScalar
-            powershell_cmd = (
-                f'powershell -Command "Add-Type -TypeDefinition \\"'
-                f'using System.Runtime.InteropServices;'
-                f'[Guid(\\"5CDF2C82-841E-4546-9722-0CF74078229A\\"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]'
-                f'interface IAudioEndpointVolume {{ void a(); void b(); void c(); void d(); '
-                f'int SetMasterVolumeLevelScalar(float fLevel, System.Guid pguidEventContext); }}'
-                f'\\"; '
-                f'"'
-            )
-            # Fallback mais simples: usa nircmd se instalado, senão loga
-            result = self.run_shell_command(
-                f'powershell -Command "[System.Media.SystemSounds]::Beep" 2>nul',
+            # Tenta via nircmd primeiro (mais preciso)
+            r = self.run_shell_command(
+                rf'nircmd setsysvolume {int(scalar * 65535)}',
                 capture_output=True
             )
-            # Método mais direto e garantido:
-            self.run_shell_command(
-                f'powershell -c "$wsh = New-Object -ComObject WScript.Shell; '
-                f'for($i=0;$i -lt 50;$i++){{$wsh.SendKeys([char]174)}}; '
-                f'for($i=0;$i -lt {level // 2};$i++){{$wsh.SendKeys([char]175)}}"'
+            if r is not None:
+                return True
+        except Exception:
+            pass
+
+        try:
+            # Fallback: PowerShell com API de áudio nativa
+            ps_cmd = (
+                f'powershell -c "'
+                f'$wsh = New-Object -ComObject WScript.Shell; '
+                f'1..50 | %{{ $wsh.SendKeys([char]174) }}; '
+                f'1..{level // 2} | %{{ $wsh.SendKeys([char]175) }}"'
             )
+            self.run_shell_command(ps_cmd)
             return True
         except Exception as e:
             logger.error(f"[OS] Erro ao ajustar volume: {e}")

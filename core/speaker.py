@@ -7,8 +7,8 @@ em português, sem custo e sem autenticação.
 Instalação:
     pip install edge-tts pygame
 
-Vozes PT-BR disponíveis (as melhores):
-    pt-BR-AntonioNeural   ← masculina, natural (recomendada para Sexta-Feira)
+Vozes PT-BR disponíveis:
+    pt-BR-AntonioNeural   ← masculina, natural
     pt-BR-FranciscaNeural ← feminina, natural
     pt-BR-ThalitaNeural   ← feminina, jovem
 
@@ -20,6 +20,7 @@ import asyncio
 import logging
 import os
 import tempfile
+import threading
 from typing import Callable
 import edge_tts
 import pygame
@@ -38,14 +39,14 @@ class Speaker:
     """
     Síntese de voz usando Microsoft Edge TTS (edge-tts).
 
-    Expõe o callback `on_speaking_change(falando: bool)` para que
-    o Orchestrator possa atualizar a interface holográfica em tempo real
-    durante toda a duração da fala.
+    CORREÇÃO: asyncio.run() conflita com o event loop do Windows quando
+    há threads ativas (pygame, watchdog, etc). A solução é rodar o loop
+    asyncio em uma thread dedicada separada, isolada do loop principal.
     """
 
     def __init__(
         self,
-        voice:  str = "francisca",
+        voice:  str = "antonio",
         rate:   str = "+0%",
         volume: str = "+0%",
         pitch:  str = "+0Hz",
@@ -55,40 +56,62 @@ class Speaker:
         self.volume = volume
         self.pitch  = pitch
 
-        # Callback chamado quando o estado de fala muda:
-        # on_speaking_change(True)  → começou a falar
-        # on_speaking_change(False) → terminou de falar
         self.on_speaking_change: Callable[[bool], None] | None = None
-
         self._speaking = False
-        pygame.mixer.init()
-        logger.info(f"Speaker iniciado | voz: {self.voice} | rate: {rate} | pitch: {pitch}")
+
+        # Thread dedicada com seu próprio event loop asyncio
+        # Evita conflito com loops já existentes (pygame, watchdog, websockets)
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
+
+        # Inicializa pygame no thread principal
+        try:
+            pygame.mixer.init()
+            logger.info(f"Speaker iniciado | voz: {self.voice} | rate: {rate} | pitch: {pitch}")
+        except Exception as e:
+            logger.error(f"[Speaker] Erro ao inicializar pygame: {e}")
+
+    def _run_loop(self):
+        """Roda o event loop asyncio em thread separada."""
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
 
     @property
     def is_speaking(self) -> bool:
         return self._speaking
 
     def _set_speaking(self, value: bool):
-        """Atualiza o estado e dispara o callback se registrado."""
+        """Atualiza estado e dispara callback."""
         if self._speaking != value:
             self._speaking = value
             if self.on_speaking_change:
                 try:
                     self.on_speaking_change(value)
                 except Exception as e:
-                    logger.warning(f"[Speaker] Erro no callback on_speaking_change: {e}")
+                    logger.warning(f"[Speaker] Erro no callback: {e}")
 
     def speak(self, text: str):
         """
         Sintetiza e reproduz o texto em voz alta.
         Bloqueante — aguarda o fim da fala antes de retornar.
-        Dispara on_speaking_change(True/False) nos limites da fala.
+        Usa thread asyncio dedicada para evitar conflitos no Windows.
         """
         if not text or not text.strip():
             return
 
         logger.info(f"[FALA] '{text}'")
-        asyncio.run(self._synthesize_and_play(text))
+
+        # Submete a coroutine ao loop dedicado e aguarda conclusão
+        future = asyncio.run_coroutine_threadsafe(
+            self._synthesize_and_play(text),
+            self._loop
+        )
+        try:
+            future.result(timeout=60)  # timeout de 60s para falas longas
+        except Exception as e:
+            logger.error(f"[Speaker] Erro na fala: {e}")
+            self._set_speaking(False)
 
     async def _synthesize_and_play(self, text: str):
         """Gera o áudio com edge-tts e reproduz com pygame."""
@@ -106,19 +129,36 @@ class Speaker:
             )
             await communicate.save(tmp_path)
 
-            pygame.mixer.music.load(tmp_path)
-            pygame.mixer.music.play()
+            # pygame precisa ser chamado do thread principal — usa call_soon_threadsafe
+            play_done = asyncio.Event()
 
-            self._set_speaking(True)   # ← interface entra em modo speak
+            def play_audio():
+                try:
+                    pygame.mixer.music.load(tmp_path)
+                    pygame.mixer.music.play()
+                except Exception as e:
+                    logger.error(f"[Speaker] Erro no pygame: {e}")
+                    self._loop.call_soon_threadsafe(play_done.set)
 
+            # Agenda reprodução no thread principal via threading
+            play_thread = threading.Thread(target=play_audio, daemon=True)
+            play_thread.start()
+            play_thread.join(timeout=2)  # aguarda o play() iniciar
+
+            self._set_speaking(True)
+
+            # Aguarda o áudio terminar
             while pygame.mixer.music.get_busy():
                 await asyncio.sleep(0.05)
 
         except Exception as e:
-            logger.error(f"[Speaker] Erro na síntese/reprodução: {e}")
+            logger.error(f"[Speaker] Erro na síntese: {e}")
         finally:
-            self._set_speaking(False)  # ← interface volta ao standby
-            pygame.mixer.music.unload()
+            self._set_speaking(False)
+            try:
+                pygame.mixer.music.unload()
+            except Exception:
+                pass
             try:
                 os.remove(tmp_path)
             except OSError:
@@ -130,7 +170,11 @@ class Speaker:
 
     def set_rate(self, rate: str):
         self.rate = rate
-        logger.info(f"[Speaker] Rate alterado para: {rate}")
+
+    def stop(self):
+        """Encerra o loop asyncio dedicado."""
+        if self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._loop.stop)
 
     @staticmethod
     async def _list_voices_async() -> list[dict]:
@@ -138,7 +182,11 @@ class Speaker:
         return [v for v in voices if "pt-BR" in v["ShortName"]]
 
     def list_voices(self) -> list[dict]:
-        voices = asyncio.run(self._list_voices_async())
+        future = asyncio.run_coroutine_threadsafe(
+            self._list_voices_async(),
+            self._loop
+        )
+        voices = future.result(timeout=10)
         for v in voices:
             logger.info(f"  {v['ShortName']} | gender: {v['Gender']}")
         return voices
