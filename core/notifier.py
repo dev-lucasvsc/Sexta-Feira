@@ -145,7 +145,7 @@ class WindowsNotifier:
 
     def notify_error(self, erro: str):
         """Notificação de erro."""
-        self.show("⚠️ Sexta-Feira — Erro", erro, duracao=8)
+        self.show("Sexta-Feira — Erro", erro, duracao=8)
 
     def notify_listening(self):
         """Notificação discreta de que está escutando."""

@@ -409,10 +409,11 @@ Comando atual: {transcricao}"""
 
         fala = (
             "Olá. Eu sou a Sexta-Feira, sua assistente pessoal de inteligência artificial. "
-            "Fui desenvolvida para facilitar sua vida digital — posso abrir aplicativos, "
-            "pesquisar na internet, consultar suas notas do Obsidian, controlar seu sistema "
-            "e responder perguntas em linguagem natural. "
-            "Estou sempre pronta quando você me chamar."
+            "Fui projetada para ser a interface central do seu ecossistema digital e do seu ambiente físico. "
+            "Entre as minhas capacidades, eu posso gerenciar seus aplicativos, consultar sua base de dados, "
+            "e operar a automação dos dispositivos inteligentes da sua casa. "
+            "Além disso, estou pronta para realizar pesquisas na rede e responder às suas perguntas. "
+            "Basta me dizer o que deseja."
         )
 
         # Dispara demonstração dos estados da interface em background
@@ -727,5 +728,5 @@ Comando atual: {transcricao}"""
         self.cmd_logger.log_session_end()
         self.interface.disconnect()
         if not self.silent_mode:
-            self.speaker.speak("Até logo.")
+            self.speaker.speak("Até mais tarde chefe.")
         logger.info("Sexta-Feira encerrada.")

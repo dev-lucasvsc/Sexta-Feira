@@ -62,7 +62,7 @@ class ModoTeste:
 
     def _inicializar_orchestrator(self):
         """Inicializa o orchestrator sem microfone."""
-        print(f"\n{self.COR_BOLD}Sexta-Feira v2.0 — Modo Teste{self.COR_RESET}")
+        print(f"\n{self.COR_BOLD}Sexta-Feira — Modo Teste{self.COR_RESET}")
         print(f"{self.COR_INFO}Inicializando sem microfone...{self.COR_RESET}")
 
         self.orq = SextaFeiraOrchestrator(
