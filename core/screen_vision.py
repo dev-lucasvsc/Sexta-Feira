@@ -1,8 +1,13 @@
 """
 Sexta-Feira v2.0 - Módulo de Visão Computacional
 =================================================
-Captura a tela e envia para o LLM analisar o conteúdo visual.
-Permite comandos como:
+Captura a tela e envia para o LLaVA (via Ollama) analisar o conteúdo visual.
+100% offline, sem limite de requisições, sem custo.
+
+Modelo usado: llava:7b
+Para baixar: ollama pull llava:7b
+
+Comandos de voz suportados:
     "o que tem na minha tela?"
     "resume o que está aberto"
     "qual é o erro na tela?"
@@ -10,14 +15,12 @@ Permite comandos como:
 
 Requer:
     pip install pillow
-
-Para análise com LLM multimodal (Claude claude-sonnet-4-20250514):
-    Precisa de ANTHROPIC_API_KEY configurada no config.py.
+    ollama pull llava:7b
 """
 
 import base64
 import logging
-import tempfile
+import requests
 from datetime import datetime
 from pathlib import Path
 from io import BytesIO
@@ -27,33 +30,60 @@ logger = logging.getLogger("ScreenVision")
 
 class ScreenVision:
     """
-    Captura e analisa o conteúdo visual da tela.
-    Usa PIL para captura e Claude Vision para análise.
+    Captura e analisa o conteúdo visual da tela usando LLaVA via Ollama.
+    Totalmente offline, sem custo e sem limite de requisições.
     """
 
     SCREENSHOT_DIR = "data/screenshots"
+    MODEL          = "llava:7b"
+    OLLAMA_URL     = "http://localhost:11434/api/generate"
 
-    def __init__(self, api_key: str = "", model: str = "claude-sonnet-4-20250514"):
-        self.api_key = api_key
-        self.model   = model
-        self._mock   = not api_key or api_key == "SUA_CHAVE_AQUI"
-
+    def __init__(self, **kwargs):
+        # Aceita qualquer kwargs para compatibilidade (ex: api_key do código antigo)
         Path(self.SCREENSHOT_DIR).mkdir(parents=True, exist_ok=True)
 
-        if self._mock:
-            logger.warning("[ScreenVision] API key não configurada. Modo MOCK ativo.")
+        # Tenta pegar URL do Ollama do config se disponível
+        try:
+            from config import Config
+            base = getattr(Config, "OLLAMA_BASE_URL", "http://localhost:11434")
+            self.OLLAMA_URL = f"{base}/api/generate"
+        except Exception:
+            pass
+
+        self._check_ollama()
+
+    # ------------------------------------------------------------------
+    # Verificação do Ollama
+    # ------------------------------------------------------------------
+
+    def _check_ollama(self):
+        """Verifica se o Ollama está rodando e o modelo LLaVA está disponível."""
+        try:
+            base = self.OLLAMA_URL.replace("/api/generate", "")
+            r = requests.get(f"{base}/api/tags", timeout=5)
+            modelos = [m["name"] for m in r.json().get("models", [])]
+
+            if not any("llava" in m for m in modelos):
+                logger.warning(
+                    "[ScreenVision] Modelo LLaVA não encontrado. "
+                    "Execute: ollama pull llava:7b"
+                )
+            else:
+                logger.info(f"[ScreenVision] LLaVA pronto via Ollama | modelo: {self.MODEL}")
+
+        except Exception as e:
+            logger.warning(f"[ScreenVision] Ollama não acessível: {e}")
 
     # ------------------------------------------------------------------
     # Captura de tela
     # ------------------------------------------------------------------
 
-    def capture(self, monitor: int = 0, save: bool = False) -> bytes | None:
+    def capture(self, save: bool = False) -> bytes | None:
         """
         Captura a tela e retorna os bytes da imagem PNG.
 
         Args:
-            monitor: Índice do monitor (0 = primário).
-            save:    Se True, salva o screenshot em disco.
+            save: Se True, salva o screenshot em disco.
 
         Returns:
             Bytes PNG da imagem, ou None em caso de erro.
@@ -61,18 +91,15 @@ class ScreenVision:
         try:
             from PIL import ImageGrab, Image
 
-            # Captura tela inteira
             img = ImageGrab.grab()
 
-            # Reduz resolução para economizar tokens do LLM
-            # Mantém proporção, limita ao máximo de 1280px de largura
+            # Reduz resolução para economizar memória — máximo 1280px de largura
             max_width = 1280
             if img.width > max_width:
                 ratio  = max_width / img.width
                 height = int(img.height * ratio)
                 img    = img.resize((max_width, height), Image.LANCZOS)
 
-            # Serializa para PNG em memória
             buffer = BytesIO()
             img.save(buffer, format="PNG", optimize=True)
             img_bytes = buffer.getvalue()
@@ -94,65 +121,63 @@ class ScreenVision:
             return None
 
     # ------------------------------------------------------------------
-    # Análise com LLM
+    # Análise com LLaVA
     # ------------------------------------------------------------------
 
     def analyze(self, pergunta: str = "O que está sendo exibido na tela?") -> tuple[bool, str]:
         """
-        Captura a tela e envia para o Claude analisar.
+        Captura a tela e envia para o LLaVA analisar.
 
         Args:
-            pergunta: Instrução para o LLM sobre o que analisar.
+            pergunta: Instrução para o modelo sobre o que analisar.
 
         Returns:
             (sucesso, resposta_em_texto)
         """
-        if self._mock:
-            return True, "Visão computacional ativa. Vejo sua tela com conteúdo em exibição."
-
         img_bytes = self.capture()
         if not img_bytes:
             return False, "Não consegui capturar a tela."
 
+        # Converte para base64 (formato aceito pelo Ollama)
+        img_b64 = base64.b64encode(img_bytes).decode("utf-8")
+
+        prompt = (
+            f"Esta é uma captura de tela do meu computador pessoal. {pergunta} "
+            "Descreva objetivamente o que está visível: aplicativos abertos, textos, "
+            "janelas, erros ou qualquer elemento relevante na tela. "
+            "Responda em português brasileiro, máximo 3 frases."
+        )
+
         try:
-            import anthropic
-
-            img_b64 = base64.standard_b64encode(img_bytes).decode("utf-8")
-            client  = anthropic.Anthropic(api_key=self.api_key)
-
-            response = client.messages.create(
-                model=self.model,
-                max_tokens=512,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type":       "base64",
-                                "media_type": "image/png",
-                                "data":       img_b64,
-                            }
-                        },
-                        {
-                            "type": "text",
-                            "text": (
-                                f"{pergunta}\n\n"
-                                "Responda em português brasileiro, de forma concisa e direta. "
-                                "Máximo 3 frases. Foque no conteúdo mais relevante visível."
-                            )
-                        }
-                    ]
-                }]
+            response = requests.post(
+                self.OLLAMA_URL,
+                json={
+                    "model":  self.MODEL,
+                    "prompt": prompt,
+                    "images": [img_b64],
+                    "stream": False,
+                },
+                timeout=60
             )
+            response.raise_for_status()
+            resposta = response.json().get("response", "").strip()
 
-            resposta = response.content[0].text.strip()
+            if not resposta:
+                return False, "O modelo não retornou uma resposta."
+
             logger.info(f"[ScreenVision] Análise concluída: {resposta[:80]}...")
             return True, resposta
 
+        except requests.exceptions.ConnectionError:
+            logger.error("[ScreenVision] Ollama não está rodando. Inicie com: ollama serve")
+            return False, "O Ollama não está rodando. Inicie o serviço e tente novamente."
         except Exception as e:
-            logger.error(f"[ScreenVision] Erro na análise: {e}")
-            return False, "Não consegui analisar o conteúdo da tela."
+            logger.error(f"[ScreenVision] Erro na análise LLaVA: {e}")
+            return False, "Não consegui analisar o conteúdo da tela no momento."
+
+    # ------------------------------------------------------------------
+    # Atalhos semânticos
+    # ------------------------------------------------------------------
 
     def read_screen_text(self) -> tuple[bool, str]:
         """Lê e resume o texto visível na tela."""
@@ -166,5 +191,5 @@ class ScreenVision:
         """Identifica erros ou problemas visíveis na tela."""
         return self.analyze(
             "Existe algum erro, aviso ou problema visível na tela? "
-            "Se sim, descreva. Se não, diga que a tela parece normal."
+            "Se sim, descreva o erro com detalhes. Se não, diga que a tela parece normal."
         )

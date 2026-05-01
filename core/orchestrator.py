@@ -110,6 +110,22 @@ class SextaFeiraOrchestrator:
             self.speaker.speak(f"Lembrete: {texto}")
 
     # ------------------------------------------------------------------
+    # Helper central de resposta
+    # ------------------------------------------------------------------
+
+    def _resposta_simples(self, fala: str, titulo: str = "Sexta-Feira", conteudo: str = "") -> dict:
+        """Monta um dict de resposta padrão sem passar pelo LLM."""
+        return {
+            "fala_vocal": fala,
+            "controle_interface": {
+                "estado": "ativo",
+                "animacao": "pulso",
+                "dados_para_projetar": {"titulo": titulo, "conteudo": conteudo or fala}
+            },
+            "acoes_sistema": []
+        }
+
+    # ------------------------------------------------------------------
     # Hora, data e clima (sem LLM)
     # ------------------------------------------------------------------
 
@@ -176,19 +192,11 @@ class SextaFeiraOrchestrator:
         else:
             ok, msg = self.screen_vision.describe_screen()
         return self._resposta_simples(msg, titulo="Visão", conteudo=msg)
-        """Helper para montar resposta sem LLM."""
-        return {
-            "fala_vocal": fala,
-            "controle_interface": {
-                "estado": "ativo", "animacao": "pulso",
-                "dados_para_projetar": {"titulo": titulo, "conteudo": conteudo or fala}
-            },
-            "acoes_sistema": []
-        }
 
     # ------------------------------------------------------------------
-    # MOCK: Simula chamada ao LLM (Claude, GPT, Ollama, etc.)
+    # Processamento central (roteamento LLM)
     # ------------------------------------------------------------------
+
     def _call_llm(self, transcricao: str, contexto_obsidian: str) -> dict:
         """
         Processamento central do comando.
@@ -274,7 +282,6 @@ class SextaFeiraOrchestrator:
     def _build_prompt(self, transcricao: str, contexto_obsidian: str) -> tuple[str, str]:
         """Retorna (system_prompt, user_prompt) com personalidade e histórico de sessão."""
 
-        # Tom de resposta baseado na configuração
         tons = {
             "formal":   "Use linguagem formal e profissional.",
             "casual":   "Use linguagem casual e amigável, como uma conversa entre amigos.",
@@ -303,11 +310,13 @@ Formato obrigatório:
 
 Regras:
 - fala_vocal: natural, sem formatação especial, sem listas
-- acoes_sistema: lista vazia [] se não houver ação de sistema
+- acoes_sistema: SEMPRE uma lista de objetos dict, NUNCA uma lista de strings
+- Cada item de acoes_sistema deve ter obrigatoriamente a chave "tipo"
+- Exemplo correto: [{{"tipo": "abrir_app", "parametro": "chrome"}}]
+- Exemplo ERRADO: ["abrir_app"]
 - Use o contexto do Obsidian para enriquecer a resposta quando relevante
 - Use o histórico da conversa para manter continuidade"""
 
-        # Histórico: usa SQLite (persistente) se disponível, senão RAM
         historico = self.history.get_summary_for_llm(n_turns=4)
         if not historico:
             historico = self.session_memory.get_summary()
@@ -326,11 +335,14 @@ Comando atual: {transcricao}"""
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            # Tenta extrair JSON de dentro de texto corrido
             import re
             match = re.search(r'\{.*\}', raw, re.DOTALL)
             if match:
-                data = json.loads(match.group())
+                try:
+                    data = json.loads(match.group())
+                except json.JSONDecodeError:
+                    logger.error(f"[{provider}] JSON inválido: {raw[:120]}")
+                    return {"fala_vocal": "Erro ao interpretar a resposta do modelo.", "controle_interface": {"estado": "erro"}, "acoes_sistema": []}
             else:
                 logger.error(f"[{provider}] JSON inválido: {raw[:120]}")
                 return {"fala_vocal": "Erro ao interpretar a resposta do modelo.", "controle_interface": {"estado": "erro"}, "acoes_sistema": []}
@@ -338,6 +350,20 @@ Comando atual: {transcricao}"""
         data.setdefault("fala_vocal", "Processado.")
         data.setdefault("controle_interface", {"estado": "ativo", "animacao": "idle", "dados_para_projetar": {}})
         data.setdefault("acoes_sistema", [])
+
+        # --- CORREÇÃO: garante que acoes_sistema é lista de dicts ---
+        acoes_raw = data.get("acoes_sistema", [])
+        acoes_validadas = []
+        for item in acoes_raw:
+            if isinstance(item, dict):
+                acoes_validadas.append(item)
+            elif isinstance(item, str):
+                # LLM retornou string em vez de dict — converte com aviso
+                logger.warning(f"[{provider}] Ação inválida (string): '{item}'. Ignorada.")
+            else:
+                logger.warning(f"[{provider}] Ação inválida (tipo {type(item)}): {item}. Ignorada.")
+        data["acoes_sistema"] = acoes_validadas
+
         logger.info(f"[{provider}] Resposta: '{data['fala_vocal'][:80]}'")
         return data
 
@@ -376,7 +402,6 @@ Comando atual: {transcricao}"""
             import requests as req
             system, user = self._build_prompt(transcricao, contexto_obsidian)
 
-            # Ollama aceita system + user em formato de chat
             response = req.post(
                 f"{Config.OLLAMA_BASE_URL}/api/chat",
                 json={
@@ -416,7 +441,6 @@ Comando atual: {transcricao}"""
             "Basta me dizer o que deseja."
         )
 
-        # Dispara demonstração dos estados da interface em background
         def demo_interface():
             import time
             estados = [
@@ -448,9 +472,7 @@ Comando atual: {transcricao}"""
 
     def _resposta_noticias(self, acoes: list) -> dict:
         """Abre Google News e anuncia que está buscando as notícias."""
-        import datetime
         hoje = datetime.datetime.now().strftime("%d de %B de %Y")
-
         fala = f"Buscando as principais notícias do dia {hoje}. Abrindo o Google Notícias para você."
 
         return {
@@ -469,9 +491,15 @@ Comando atual: {transcricao}"""
     # ------------------------------------------------------------------
     # Executor de ações do sistema
     # ------------------------------------------------------------------
+
     def _executar_acoes(self, acoes: list):
         """Interpreta e executa a lista de ações retornadas pelo processador de intenções / LLM."""
         for acao in acoes:
+            # CORREÇÃO: ignora itens que não sejam dicionários
+            if not isinstance(acao, dict):
+                logger.warning(f"[Orchestrator] Ação ignorada (formato inválido: {type(acao).__name__}): {acao}")
+                continue
+
             tipo = acao.get("tipo")
 
             if tipo == "apresentacao":
@@ -490,7 +518,6 @@ Comando atual: {transcricao}"""
 
             elif tipo == "abrir_app":
                 parametro = acao.get("parametro", "")
-                # Se o WhatsApp não foi encontrado localmente, abre a versão web
                 if parametro.startswith("http"):
                     self.os_automation.open_url(parametro)
                 else:
@@ -657,6 +684,7 @@ Comando atual: {transcricao}"""
     # ------------------------------------------------------------------
     # Loop principal
     # ------------------------------------------------------------------
+
     def start(self):
         """Inicia o loop principal do assistente."""
         self.running = True
@@ -697,15 +725,20 @@ Comando atual: {transcricao}"""
                     if not self.silent_mode:
                         self.speaker.speak(fala)
                     else:
-                        # Modo silencioso: só atualiza interface
                         self.interface.send_state("speak", payload={"texto": fala})
                         time.sleep(0.5)
                         self.interface.send_state("standby")
 
-                # 6. Executa ações
+                # 6. Executa ações — com proteção contra itens inválidos
                 acoes = resposta.get("acoes_sistema", [])
                 for acao in acoes:
-                    self.cmd_logger.log_action(acao.get("tipo", "?"), str(acao.get("parametro", "")))
+                    if isinstance(acao, dict):
+                        self.cmd_logger.log_action(
+                            acao.get("tipo", "?"),
+                            str(acao.get("parametro", ""))
+                        )
+                    else:
+                        logger.warning(f"[Orchestrator] log ignorado — ação não é dict: {acao}")
                 self._executar_acoes(acoes)
 
                 self.cmd_logger.log_separator()
@@ -728,5 +761,5 @@ Comando atual: {transcricao}"""
         self.cmd_logger.log_session_end()
         self.interface.disconnect()
         if not self.silent_mode:
-            self.speaker.speak("Até mais tarde chefe.")
+            self.speaker.speak("Até mais tarde, chefe.")
         logger.info("Sexta-Feira encerrada.")
