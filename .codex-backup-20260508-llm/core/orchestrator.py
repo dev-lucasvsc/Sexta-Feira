@@ -1,4 +1,4 @@
-﻿"""
+"""
 Sexta-Feira v2.0 - Orquestrador Central (Cérebro)
 ============================================
 Responsável por unir todos os módulos e gerenciar o loop principal.
@@ -26,9 +26,6 @@ from core.screen_vision import ScreenVision
 from core.window_manager import WindowManager
 from core.notifier import WindowsNotifier
 from core.calendar_manager import CalendarManager
-from core.tool_registry import ToolRegistry
-from core.preferences import PreferencesStore
-from core.diagnostics import build_diagnostic
 
 # Configuração de log global
 logging.basicConfig(
@@ -86,9 +83,6 @@ class SextaFeiraOrchestrator:
         self.window_manager  = WindowManager()
         self.notifier        = WindowsNotifier()
         self.calendar        = CalendarManager()
-        self.tool_registry   = ToolRegistry()
-        self.preferences     = PreferencesStore()
-        self.pending_confirmation = None
 
         # Modo silencioso — responde só na interface, sem fala
         self.silent_mode = False
@@ -167,7 +161,7 @@ class SextaFeiraOrchestrator:
             import requests as req
             url = (
                 f"https://api.openweathermap.org/data/2.5/weather"
-                f"q={Config.WEATHER_CITY},{Config.WEATHER_COUNTRY}"
+                f"?q={Config.WEATHER_CITY},{Config.WEATHER_COUNTRY}"
                 f"&appid={Config.WEATHER_API_KEY}"
                 f"&lang={Config.WEATHER_LANG}"
                 f"&units={Config.WEATHER_UNITS}"
@@ -258,11 +252,6 @@ class SextaFeiraOrchestrator:
                 return self._resposta_apresentacao(acoes)
             if fala_intent == "__noticias__":
                 return self._resposta_noticias(acoes)
-            if fala_intent == "__diagnostico__":
-                msg = build_diagnostic(self)
-                return self._resposta_simples(msg, titulo="Diagnostico", conteudo=msg)
-            if fala_intent in ("__confirmar__", "__cancelar__"):
-                return {"fala_vocal": "", "controle_interface": {"estado": "ativo"}, "acoes_sistema": acoes}
             return {
                 "fala_vocal": fala_intent,
                 "controle_interface": {
@@ -326,19 +315,13 @@ Regras:
 - Exemplo correto: [{{"tipo": "abrir_app", "parametro": "chrome"}}]
 - Exemplo ERRADO: ["abrir_app"]
 - Use o contexto do Obsidian para enriquecer a resposta quando relevante
-- Use o histórico da conversa para manter continuidade
-- Nunca crie acoes_sistema para desligar, reiniciar, apagar arquivos ou executar shell
-- Para comandos arriscados, responda pedindo confirmação em fala_vocal e deixe acoes_sistema vazio"""
+- Use o histórico da conversa para manter continuidade"""
 
         historico = self.history.get_summary_for_llm(n_turns=4)
         if not historico:
             historico = self.session_memory.get_summary()
 
         user = f"""{f'{historico}{chr(10)}' if historico else ''}
-{self.preferences.summary_for_prompt()}
-
-{self.tool_registry.summary_for_prompt()}
-
 Contexto do segundo cérebro (Obsidian):
 {contexto_obsidian if contexto_obsidian else 'Nenhuma nota relevante encontrada.'}
 
@@ -371,14 +354,9 @@ Comando atual: {transcricao}"""
         # --- CORREÇÃO: garante que acoes_sistema é lista de dicts ---
         acoes_raw = data.get("acoes_sistema", [])
         acoes_validadas = []
-        allowed_actions = self.tool_registry.allowed_llm_action_types() if hasattr(self, "tool_registry") else getattr(Config, "LLM_ALLOWED_ACTION_TYPES", set())
         for item in acoes_raw:
             if isinstance(item, dict):
-                tipo = item.get("tipo")
-                if tipo in allowed_actions:
-                    acoes_validadas.append(item)
-                else:
-                    logger.warning(f"[{provider}] Ação bloqueada para segurança: {tipo}")
+                acoes_validadas.append(item)
             elif isinstance(item, str):
                 # LLM retornou string em vez de dict — converte com aviso
                 logger.warning(f"[{provider}] Ação inválida (string): '{item}'. Ignorada.")
@@ -418,60 +396,26 @@ Comando atual: {transcricao}"""
         """
         Chama o Ollama local e retorna o JSON estruturado.
         Requer Ollama rodando: https://ollama.com
-        Modelo recomendado: ollama pull qwen3:8b
+        Modelo recomendado: ollama pull llama3.2
         """
         try:
             import requests as req
             system, user = self._build_prompt(transcricao, contexto_obsidian)
 
-            payload = {
-                "model": Config.OLLAMA_MODEL,
-                "stream": False,
-                "think": Config.OLLAMA_THINK,
-                "options": {
-                    "temperature": Config.OLLAMA_TEMPERATURE
-                },
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user}
-                ]
-            }
-
-            if Config.OLLAMA_USE_TOOLS:
-                payload["tools"] = self.tool_registry.to_ollama_tools()
-            else:
-                payload["format"] = "json"
-
             response = req.post(
                 f"{Config.OLLAMA_BASE_URL}/api/chat",
-                json=payload,
+                json={
+                    "model": Config.OLLAMA_MODEL,
+                    "stream": False,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user",   "content": user}
+                    ]
+                },
                 timeout=30
             )
             response.raise_for_status()
-            message = response.json().get("message", {})
-            tool_calls = message.get("tool_calls") or []
-            if tool_calls:
-                acoes = []
-                for call in tool_calls:
-                    fn = call.get("function", {})
-                    args = fn.get("arguments") or {}
-                    if isinstance(args, str):
-                        try:
-                            args = json.loads(args)
-                        except json.JSONDecodeError:
-                            args = {}
-                    acao = {"tipo": fn.get("name"), **args}
-                    if self.tool_registry.is_allowed_from_llm(acao.get("tipo")):
-                        acoes.append(acao)
-                    else:
-                        logger.warning(f"[Ollama] Tool call bloqueada: {acao.get('tipo')}")
-                return {
-                    "fala_vocal": "Certo, executando.",
-                    "controle_interface": {"estado": "ativo", "animacao": "pulso", "dados_para_projetar": {}},
-                    "acoes_sistema": acoes
-                }
-
-            raw = message.get("content", "")
+            raw = response.json()["message"]["content"]
             return self._parse_llm_response(raw, "Ollama")
         except Exception as e:
             logger.error(f"[Ollama] Erro: {e}")
@@ -557,41 +501,8 @@ Comando atual: {transcricao}"""
                 continue
 
             tipo = acao.get("tipo")
-            if tipo == "confirmar_acao":
-                if self.pending_confirmation:
-                    pendente = self.pending_confirmation
-                    self.pending_confirmation = None
-                    pendente["confirmado"] = True
-                    self.speaker.speak("Confirmado. Executando agora.")
-                    self._executar_acoes([pendente])
-                else:
-                    self.speaker.speak("Nao ha nenhuma acao pendente para confirmar.")
-                continue
 
-            if tipo == "cancelar_acao":
-                if self.pending_confirmation:
-                    self.pending_confirmation = None
-                    self.speaker.speak("Acao cancelada.")
-                else:
-                    self.speaker.speak("Nao ha nenhuma acao pendente para cancelar.")
-                continue
-
-            if self.tool_registry.needs_confirmation(acao):
-                self.pending_confirmation = acao
-                tool = self.tool_registry.get(tipo)
-                descricao = tool.description if tool else tipo
-                self.speaker.speak(f"Essa acao precisa de confirmacao: {descricao}. Diga confirmar para executar ou cancelar para ignorar.")
-                continue
-
-
-            if tipo == "preferencia_set":
-                ok = self.preferences.set(acao.get("chave", ""), acao.get("valor", ""))
-                self.speaker.speak("Preferencia salva." if ok else "Nao consegui salvar essa preferencia.")
-
-            elif tipo == "diagnostico":
-                self.speaker.speak(build_diagnostic(self))
-
-            elif tipo == "apresentacao":
+            if tipo == "apresentacao":
                 pass
 
             elif tipo == "lembrete":
@@ -779,7 +690,7 @@ Comando atual: {transcricao}"""
         self.running = True
         self.interface.connect()
         self.interface.send_state("standby")
-        self.speaker.speak("Olá chefe, como posso ajudar hoje.")
+        self.speaker.speak("Olá chefe, como posso ajudar hoje?.")
 
         logger.info(f"Loop principal iniciado. Wake word: '{self.WAKE_WORD}'")
 
@@ -823,7 +734,7 @@ Comando atual: {transcricao}"""
                 for acao in acoes:
                     if isinstance(acao, dict):
                         self.cmd_logger.log_action(
-                            acao.get("tipo", ""),
+                            acao.get("tipo", "?"),
                             str(acao.get("parametro", ""))
                         )
                     else:

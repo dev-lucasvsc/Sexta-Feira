@@ -26,6 +26,9 @@ Comandos de voz suportados:
 """
 
 import logging
+import os
+import time
+import webbrowser
 from pathlib import Path
 
 logger = logging.getLogger("Spotify")
@@ -46,8 +49,8 @@ class SpotifyController:
         self.client_secret = client_secret
         self._sp           = None
         self._mock_mode    = not (client_id and client_secret
-                                  and client_id != "SEU_CLIENT_ID"
-                                  and client_secret != "SEU_CLIENT_SECRET")
+                                  and client_id not in ("SEU_CLIENT_ID", "SEU_CLIENT_ID_AQUI")
+                                  and client_secret not in ("SEU_CLIENT_SECRET", "SEU_CLIENT_SECRET_AQUI"))
 
         if self._mock_mode:
             logger.warning("[Spotify] Credenciais não configuradas. Modo MOCK ativo.")
@@ -100,6 +103,41 @@ class SpotifyController:
             return False
         return True
 
+    def _open_spotify_app(self):
+        """Tenta abrir o Spotify Desktop para registrar um device ativo na Web API."""
+        try:
+            os.startfile("spotify:")  # type: ignore[attr-defined]
+        except Exception:
+            webbrowser.open("spotify:")
+
+    def _get_playback_device_id(self) -> str | None:
+        """Retorna um device do Spotify pronto para receber comandos de playback."""
+        try:
+            devices = self._sp.devices().get("devices", [])
+            active = next((d for d in devices if d.get("is_active")), None)
+            if active:
+                return active.get("id")
+
+            if not devices:
+                logger.info("[Spotify] Nenhum device encontrado. Abrindo Spotify Desktop...")
+                self._open_spotify_app()
+                time.sleep(3)
+                devices = self._sp.devices().get("devices", [])
+
+            if not devices:
+                return None
+
+            device_id = devices[0].get("id")
+            if device_id:
+                try:
+                    self._sp.transfer_playback(device_id=device_id, force_play=False)
+                    time.sleep(1)
+                except Exception as e:
+                    logger.warning(f"[Spotify] Nao consegui transferir playback: {e}")
+            return device_id
+        except Exception as e:
+            logger.error(f"[Spotify] Erro ao buscar devices: {e}")
+            return None
     def authorize(self):
         """
         Fluxo de autorização manual (usado pelo setup_spotify.py).
@@ -127,7 +165,7 @@ class SpotifyController:
             # Isso abre o browser e aguarda a URL de callback
             print("\n[Spotify] Abrindo browser para autorização...")
             print("[Spotify] Após autorizar, COLE a URL completa de redirecionamento aqui:")
-            print(f"[Spotify] (começa com {REDIRECT_URI}?code=...)\n")
+            print(f"[Spotify] (começa com {REDIRECT_URI}code=...)\n")
 
             auth_url = auth_manager.get_authorize_url()
             import webbrowser
@@ -158,7 +196,10 @@ class SpotifyController:
         if not self._ready():
             return False, "Spotify não autorizado. Execute setup_spotify.py"
         try:
-            self._sp.start_playback()
+            device_id = self._get_playback_device_id()
+            if not device_id:
+                return False, "Nao encontrei um dispositivo ativo do Spotify. Abra o Spotify e tente de novo."
+            self._sp.start_playback(device_id=device_id)
             return True, "Reprodução iniciada."
         except Exception as e:
             logger.error(f"[Spotify] play: {e}")
@@ -278,7 +319,10 @@ class SpotifyController:
             nome    = track["name"]
             artista = track["artists"][0]["name"]
 
-            self._sp.start_playback(uris=[uri])
+            device_id = self._get_playback_device_id()
+            if not device_id:
+                return False, "Nao encontrei um dispositivo ativo do Spotify. Abra o Spotify e tente de novo."
+            self._sp.start_playback(device_id=device_id, uris=[uri])
             return True, f"Tocando {nome}, de {artista}."
         except Exception as e:
             logger.error(f"[Spotify] search_and_play: {e}")

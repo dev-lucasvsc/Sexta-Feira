@@ -109,8 +109,7 @@ D:\jarvis\models\vosk-model-small-pt-0.3\
 Baixe em: https://ollama.com/download
 
 ```bash
-ollama pull qwen3:8b
-ollama pull llava:7b
+ollama pull llama3.2
 ```
 
 ---
@@ -135,7 +134,6 @@ SPOTIFY_CLIENT_SECRET=seu_client_secret
 OBSIDIAN_VAULT_PATH = "C:/Users/Lucas/OneDrive/Documentos/Obsidian Vault"
 WAKE_WORD           = "sexta"
 LLM_PROVIDER        = "ollama"     # "claude" | "ollama" | "none"
-OLLAMA_MODEL        = "qwen3:8b"   # use "qwen3:14b" se sua máquina aguentar
 TTS_VOICE           = "antonio"    # voz masculina PT-BR
 TTS_PITCH           = "-4Hz"       # tom mais grave
 WEATHER_CITY        = "Brasilia"
@@ -175,12 +173,12 @@ Google STT transcreve o comando completo
     ↓
 Orchestrator processa em cascata:
 
-    1. Hora / data          → resposta imediata (stdlib)
-    2. Clima                → OpenWeatherMap API
-    3. Tela                 → ScreenVision (PIL + Claude Vision)
-    4. Calendário           → Google Calendar API
-    5. Intenção local       → IntentParser (apps, sites, janelas, Spotify...)
-    6. LLM                  → Ollama local ou Claude API
+    1. Hora / data?          → resposta imediata (stdlib)
+    2. Clima?                → OpenWeatherMap API
+    3. Tela?                 → ScreenVision (PIL + Claude Vision)
+    4. Calendário?           → Google Calendar API
+    5. Intenção local?       → IntentParser (apps, sites, janelas, Spotify...)
+    6. LLM?                  → Ollama local ou Claude API
                                (com contexto do Obsidian + histórico SQLite)
 
     ↓

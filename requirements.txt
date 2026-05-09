@@ -1,4 +1,4 @@
-# JARVIS v2.0 - Dependências do Projeto
+﻿# JARVIS v2.0 - Dependências do Projeto
 # =======================================
 # Instale com:
 #   python -m pip install -r requirements.txt
@@ -43,6 +43,9 @@ google-auth==2.29.0
 google-auth-oauthlib==1.2.0
 google-auth-httplib2==0.2.0
 google-api-python-client==2.127.0
+
+# --- Spotify ---
+spotipy==2.23.0
 
 # --- Utilitários ---
 python-dotenv==1.0.1

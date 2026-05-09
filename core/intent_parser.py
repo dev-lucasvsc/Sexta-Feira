@@ -174,6 +174,20 @@ class IntentParser:
         acoes = []
         fala = ""
 
+        if comando in ("confirmar", "confirmo", "pode confirmar", "sim confirmar", "sim, confirmar"):
+            return [{"tipo": "confirmar_acao"}], "__confirmar__"
+
+        if comando in ("cancelar", "cancela", "cancelar acao", "cancela acao", "deixa pra la"):
+            return [{"tipo": "cancelar_acao"}], "__cancelar__"
+
+        if any(t in comando for t in ["diagnostico", "diagnóstico", "status da sexta", "checar sistema", "verificar sistema", "como voce esta", "como você está"]):
+            return [{"tipo": "diagnostico"}], "__diagnostico__"
+
+        preferencia = self._parse_preference(comando)
+        if preferencia:
+            chave, valor = preferencia
+            return [{"tipo": "preferencia_set", "chave": chave, "valor": valor}], f"Preferencia salva: {chave}."
+
         # --- Apresentação ---
         if any(t in comando for t in [
             "quem é você", "quem você é", "se apresenta", "se apresente",
@@ -189,7 +203,7 @@ class IntentParser:
             "me dá as notícias", "notícias de hoje", "últimas notícias",
             "o que está acontecendo", "manchetes"
         ]):
-            acoes.append({"tipo": "abrir_site", "parametro": "https://news.google.com/topstories?hl=pt-BR&gl=BR&ceid=BR:pt-419"})
+            acoes.append({"tipo": "abrir_site", "parametro": "https://news.google.com/topstorieshl=pt-BR&gl=BR&ceid=BR:pt-419"})
             fala = "__noticias__"
 
         # --- Controle de janelas ---
@@ -265,11 +279,11 @@ class IntentParser:
             acoes.append({"tipo": "spotify_shuffle"})
             fala = "__spotify_shuffle__"
 
-        elif any(t in comando for t in ["tocar", "toca", "reproduzir", "colocar para tocar"]):
+        elif any(t in comando for t in ["tocar", "toca", "toque", "bota", "coloca", "solta", "play", "reproduzir", "colocar para tocar", "dar play", "dá play"]):
             if "spotify" in comando or any(t in comando for t in ["música", "artista", "album", "playlist"]):
-                query = self._extract_after(comando, ["tocar", "toca", "reproduzir",
+                query = self._extract_after(comando, ["tocar", "toca", "toque", "bota", "coloca", "solta", "play", "reproduzir",
                                                        "colocar para tocar", "no spotify"])
-                query = query.replace("spotify", "").replace("música", "").strip()
+                query = self._clean_spotify_query(query)
                 if query:
                     acoes.append({"tipo": "spotify_play", "query": query})
                     fala = f"Buscando {query} no Spotify."
@@ -285,7 +299,7 @@ class IntentParser:
                 acoes.append({"tipo": "obsidian_anotar", "conteudo": conteudo})
                 fala = f"Anotando no diário: {conteudo[:50]}."
             else:
-                fala = "O que devo anotar?"
+                fala = "O que devo anotar"
 
         # --- Obsidian: criar tarefa ---
         elif any(t in comando for t in ["criar tarefa", "nova tarefa", "adicionar tarefa", "tarefa nova"]):
@@ -295,7 +309,7 @@ class IntentParser:
                 acoes.append({"tipo": "obsidian_tarefa", "conteudo": tarefa})
                 fala = f"Criando tarefa: {tarefa[:50]}."
             else:
-                fala = "Qual é a tarefa?"
+                fala = "Qual é a tarefa"
 
         # --- Obsidian: criar nota ---
         elif any(t in comando for t in ["criar nota", "nova nota", "criar arquivo"]):
@@ -305,7 +319,7 @@ class IntentParser:
                 acoes.append({"tipo": "obsidian_criar", "titulo": titulo})
                 fala = f"Criando nota '{titulo}' no Obsidian."
             else:
-                fala = "Qual o título da nota?"
+                fala = "Qual o título da nota"
 
         # --- Lembretes ---
         elif any(t in comando for t in ["lembra", "lembrete", "me avisa", "me lembra", "alarme"]):
@@ -350,7 +364,7 @@ class IntentParser:
                 acoes.append({"tipo": "arquivo_criar_pasta", "path": f"~/Desktop/{nome}"})
                 fala = f"Criando pasta '{nome}' na área de trabalho."
             else:
-                fala = "Qual o nome da pasta que devo criar?"
+                fala = "Qual o nome da pasta que devo criar"
 
         # --- Listar pasta ---
         elif any(t in comando for t in ["listar", "listar pasta", "o que tem na pasta", "mostrar arquivos", "ver arquivos"]):
@@ -366,10 +380,10 @@ class IntentParser:
                 acoes.append({"tipo": "arquivo_buscar", "path": "~/", "nome": nome})
                 fala = f"Buscando '{nome}' nos seus arquivos."
             else:
-                fala = "Qual arquivo devo buscar?"
+                fala = "Qual arquivo devo buscar"
 
         # --- Abrir aplicativo ---
-        elif any(t in comando for t in ["abrir", "abre", "abra", "iniciar", "inicia", "lançar", "executar", "abrindo"]):
+        elif any(t in comando for t in ["abrir", "abre", "abra", "iniciar", "inicia", "lançar", "lançar", "executar", "abrindo", "abre pra mim"]):
             app = self._match_app(comando)
             if app:
                 nome, cmd = app
@@ -408,7 +422,7 @@ class IntentParser:
         elif any(t in comando for t in ["pesquisar", "pesquisa", "buscar", "busca", "procurar", "procura", "googlar"]):
             query = self._extract_search_query(comando)
             if query:
-                url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+                url = f"https://www.google.com/searchq={query.replace(' ', '+')}"
                 acoes.append({"tipo": "abrir_site", "parametro": url})
                 fala = f"Pesquisando por {query}."
             else:
@@ -418,7 +432,7 @@ class IntentParser:
         elif "youtube" in comando and any(t in comando for t in ["tocar", "toca", "colocar", "coloca", "buscar", "pesquisar"]):
             query = self._extract_after(comando, ["tocar", "toca", "colocar", "coloca", "buscar", "pesquisar", "no youtube", "youtube"])
             if query:
-                url = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
+                url = f"https://www.youtube.com/resultssearch_query={query.replace(' ', '+')}"
                 acoes.append({"tipo": "abrir_site", "parametro": url})
                 fala = f"Buscando {query} no YouTube."
 
@@ -472,6 +486,33 @@ class IntentParser:
     # Helpers internos
     # ------------------------------------------------------------------
 
+    def _parse_preference(self, comando: str) -> tuple[str, str] | None:
+        """Extrai preferencias simples do usuario."""
+        patterns = [
+            (r"me chama de (.+)$", "nome_usuario"),
+            (r"pode me chamar de (.+)$", "nome_usuario"),
+            (r"minha playlist padr[aã]o [eé] (.+)$", "playlist_padrao"),
+            (r"prefiro respostas (.+)$", "estilo_resposta"),
+            (r"lembre que (.+)$", "lembranca"),
+            (r"lembra que (.+)$", "lembranca"),
+        ]
+        for pattern, key in patterns:
+            match = re.search(pattern, comando)
+            if match:
+                return key, match.group(1).strip()
+        return None
+
+    def _clean_spotify_query(self, query: str) -> str:
+        """Remove palavras de comando que nao fazem parte da busca musical."""
+        query = query.strip()
+        replacements = [
+            "no spotify", "do spotify", "na spotify", "spotify",
+            "musica", "música", "uma musica", "uma música",
+            "dar play em", "dá play em", "colocar para tocar",
+        ]
+        for item in replacements:
+            query = query.replace(item, "")
+        return " ".join(query.split()).strip()
     def _match_app(self, comando: str) -> tuple[str, str] | None:
         """
         Tenta encontrar um app no comando.
@@ -573,3 +614,4 @@ class IntentParser:
             return None, "Use 'volume 30' para definir o nível exato."
 
         return None, "Não entendi o nível de volume desejado."
+
