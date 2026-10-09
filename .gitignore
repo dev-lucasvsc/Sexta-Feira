@@ -1,12 +1,30 @@
 # Segurança
 .env
 config.py
+data/google_credentials.json
+data/google_token.json
+data/spotify_token/
+data/spotify_token.json
 
 # Pastas do Python
 __pycache__/
 *.pyc
 
-# Ambientes Virtuais (se você tiver)
+# Ambientes Virtuais
 venv/
 .venv/
 env/
+
+# Memória local / runtime
+data/*.db
+data/*.sqlite
+data/*.sqlite-*
+data/screenshots/
+logs/
+
+# Modelos (baixar separado, ver README)
+models/
+
+# Backups
+*.backup-*
+.codex-backup-*/
